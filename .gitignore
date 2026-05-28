@@ -21,3 +21,13 @@ rad.json
 *.flf
 #Test results file
 TestResults.xml
+
+### CMake ###
+build/
+cmake-build-*/
+CMakeUserPresets.json
+
+### Native binaries ###
+*.exe
+*.obj
+*.o

@@ -1,0 +1,24 @@
+#pragma once
+#define NORMAL 0
+#ifdef LANG_TOOLS
+#define ERROR_INVALID_LANGUAGE 0x03
+#define ERROR_NO_SUCH_FILE_OR_DIRECTORY 0x02
+#define ERROR_INVALID_CONFIG 0x01
+
+#define SUPPORT_LANG_CN 0x01
+#define SUPPORT_LANG_EN 0x02
+#endif
+
+#ifdef PACMAN
+#define CONFIG_MAIN config
+#define CONFIG_SYNC config_sy
+#define CONFIG_LANGUAGE language_map
+#define LANG_HELP_MAIN 0x1
+
+#define CONFIG_LANG_DEFAULT CONFIG_LANG_EN
+#define CONFIG_LANG_CN 0x01
+#define CONFIG_LANG_EN 0x02
+
+#define ERROR_INVALID_LANGUAGE 0x01
+#define ERROR_NO_SUCH_FILE_OR_DIRECTORY 0x02
+#endif
