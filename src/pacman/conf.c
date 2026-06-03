@@ -38,6 +38,7 @@
 #include "ini.h"
 #include "util.h"
 #include "callback.h"
+#include "../windows-backend/backend.h"
 
 /* global config variable */
 config_t *config = NULL;
@@ -107,7 +108,17 @@ config_t *config_new(void)
 	/* defaults which may get overridden later */
 	newconfig->op = PM_OP_MAIN;
 	newconfig->logmask = ALPM_LOG_ERROR | ALPM_LOG_WARNING;
-	newconfig->configfile = strdup(CONFFILE);
+	if(pm_windows_backend_enabled()) {
+		newconfig->configfile = strdup("etc/pacman.conf");
+		newconfig->rootdir = strdup(".");
+		newconfig->dbpath = strdup("var/lib/pacman/");
+		newconfig->logfile = strdup("var/log/pacman.log");
+		newconfig->gpgdir = strdup("etc/pacman.d/gnupg/");
+		newconfig->cachedirs = alpm_list_add(NULL, strdup("var/cache/pacman/pkg/"));
+		newconfig->hookdirs = alpm_list_add(NULL, strdup("etc/pacman.d/hooks/"));
+	} else {
+		newconfig->configfile = strdup(CONFFILE);
+	}
 	if(alpm_capabilities() & ALPM_CAPABILITY_SIGNATURES) {
 		newconfig->siglevel = ALPM_SIG_PACKAGE | ALPM_SIG_DATABASE;
 		newconfig->localfilesiglevel = ALPM_SIG_USE_DEFAULT;

@@ -35,6 +35,7 @@
 #include "check.h"
 #include "conf.h"
 #include "util.h"
+#include "../windows-backend/backend.h"
 
 #define LOCAL_PREFIX "local/"
 
@@ -403,6 +404,31 @@ int pacman_query(alpm_list_t *targets)
 	alpm_list_t *i;
 	alpm_pkg_t *pkg = NULL;
 	alpm_db_t *db_local;
+
+	if(pm_windows_query_should_handle(config->op_q_info, config->op_q_list)) {
+		pm_winpkg_result_t *result = pm_windows_query_execute(
+			config->handle,
+			targets,
+			config->op_q_info,
+			config->op_q_list,
+			config->quiet,
+			config->op_q_explicit,
+			config->op_q_deps);
+		if(result) {
+			for(alpm_list_t *m = result->messages; m; m = m->next) {
+				printf("%s\n", (const char *)m->data);
+			}
+			if(!result->success) {
+				for(alpm_list_t *e = result->errors; e; e = e->next) {
+					pm_printf(ALPM_LOG_ERROR, "%s\n", (const char *)e->data);
+				}
+				pm_windows_result_free(result);
+				return 1;
+			}
+			pm_windows_result_free(result);
+			return 0;
+		}
+	}
 
 	/* First: operations that do not require targets */
 

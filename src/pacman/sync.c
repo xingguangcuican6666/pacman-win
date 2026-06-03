@@ -37,6 +37,7 @@
 #include "package.h"
 #include "callback.h"
 #include "conf.h"
+#include "../windows-backend/backend.h"
 
 static int unlink_verbose(const char *pathname, int ignore_missing)
 {
@@ -822,6 +823,25 @@ int sync_prepare_execute(void)
 			printf(_(" there is nothing to do\n"));
 		}
 		goto cleanup;
+	}
+
+	if(pm_windows_backend_enabled()) {
+		pm_winpkg_result_t *result = pm_windows_sync_execute(config->handle, packages, config->flags);
+		if(result) {
+			for(i = result->messages; i; i = i->next) {
+				printf("%s\n", (const char *)i->data);
+			}
+			if(!result->success) {
+				for(i = result->errors; i; i = i->next) {
+					pm_printf(ALPM_LOG_ERROR, "%s\n", (const char *)i->data);
+				}
+				pm_windows_result_free(result);
+				retval = 1;
+				goto cleanup;
+			}
+			pm_windows_result_free(result);
+			goto cleanup;
+		}
 	}
 
 	/* Step 3: actually perform the operation */

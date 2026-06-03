@@ -29,6 +29,7 @@
 #include "pacman.h"
 #include "util.h"
 #include "conf.h"
+#include "../windows-backend/backend.h"
 
 static int fnmatch_cmp(const void *pattern, const void *string)
 {
@@ -80,6 +81,21 @@ int pacman_remove(alpm_list_t *targets)
 {
 	int retval = 0;
 	alpm_list_t *i, *data = NULL;
+
+	if(pm_windows_remove_should_handle(targets)) {
+		pm_winpkg_result_t *result = pm_windows_remove_execute(config->handle, targets, config->flags);
+		if(result) {
+			if(!result->success) {
+				for(i = result->errors; i; i = i->next) {
+					pm_printf(ALPM_LOG_ERROR, "%s\n", (const char *)i->data);
+				}
+				pm_windows_result_free(result);
+				return 1;
+			}
+			pm_windows_result_free(result);
+			return 0;
+		}
+	}
 
 	if(targets == NULL) {
 		pm_printf(ALPM_LOG_ERROR, _("no targets specified (use -h for help)\n"));

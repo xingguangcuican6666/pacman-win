@@ -45,6 +45,7 @@
 #include "util.h"
 #include "conf.h"
 #include "sighandler.h"
+#include "../windows-backend/backend.h"
 
 /* list of targets specified on command line */
 static alpm_list_t *pm_targets;
@@ -1224,8 +1225,20 @@ int main(int argc, char *argv[])
 
 	/* check if we have sufficient permission for the requested operation */
 	if(myuid > 0 && needs_root()) {
+		int windows_backend_ok = 0;
+		if(config->op == PM_OP_UPGRADE && pm_windows_upgrade_should_handle(pm_targets)) {
+			windows_backend_ok = 1;
+		} else if(config->op == PM_OP_SYNC && pm_windows_sync_should_handle(pm_targets)) {
+			windows_backend_ok = 1;
+		} else if(config->op == PM_OP_REMOVE && pm_windows_remove_should_handle(pm_targets)) {
+			windows_backend_ok = 1;
+		} else if(config->op == PM_OP_QUERY && pm_windows_query_should_handle(config->op_q_info, config->op_q_list)) {
+			windows_backend_ok = 1;
+		}
+		if(!windows_backend_ok) {
 		pm_printf(ALPM_LOG_ERROR, _("you cannot perform this operation unless you are root.\n"));
 		cleanup(EXIT_FAILURE);
+		}
 	}
 
 	/* we support reading targets from stdin if a cmdline parameter is '-' */

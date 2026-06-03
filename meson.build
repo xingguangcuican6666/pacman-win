@@ -1,5 +1,5 @@
 project('pacman',
-        'c',
+        'c', 'cpp',
         version : '7.1.0',
         license : 'GPLv2+',
         default_options : [
@@ -324,6 +324,7 @@ if build_doc
 endif
 
 includes = include_directories('src/common', 'lib/libalpm')
+subdir('src/windows-backend')
 
 libcommon = static_library(
   'common',
@@ -367,7 +368,7 @@ pkgconfig.generate(
 
 pacman_bin = executable(
   'pacman',
-  pacman_sources,
+  pacman_sources + windows_backend_sources,
   include_directories : includes,
   link_with : [libalpm, libcommon],
   dependencies : [libarchive],

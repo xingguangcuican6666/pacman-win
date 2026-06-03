@@ -29,6 +29,7 @@
 #include "pacman.h"
 #include "conf.h"
 #include "util.h"
+#include "../windows-backend/backend.h"
 
 /* add targets to the created transaction */
 static int load_packages(alpm_list_t *targets, int siglevel)
@@ -71,6 +72,21 @@ int pacman_upgrade(alpm_list_t *targets)
 	alpm_list_t *remote_targets = NULL, *fetched_files = NULL;
 	alpm_list_t *local_targets = NULL;
 	alpm_list_t *i;
+
+	if(pm_windows_upgrade_should_handle(targets)) {
+		pm_winpkg_result_t *result = pm_windows_upgrade_execute(config->handle, targets, config->flags);
+		if(!result || !result->success) {
+			if(result && result->errors) {
+				for(i = result->errors; i; i = i->next) {
+					pm_printf(ALPM_LOG_ERROR, "%s\n", (const char *)i->data);
+				}
+			}
+			pm_windows_result_free(result);
+			return 1;
+		}
+		pm_windows_result_free(result);
+		return 0;
+	}
 
 	if(targets == NULL) {
 		pm_printf(ALPM_LOG_ERROR, _("no targets specified (use -h for help)\n"));
