@@ -376,6 +376,16 @@ pm_winpkg_result_t *pm_windows_query_execute(alpm_handle_t *handle, alpm_list_t 
 			result->messages = alpm_list_add(result->messages, strdup(("Version         : " + pkg.manifest.version).c_str()));
 			result->messages = alpm_list_add(result->messages, strdup(("Description     : " + pkg.manifest.desc).c_str()));
 			result->messages = alpm_list_add(result->messages, strdup(("Architecture    : " + pkg.manifest.arch).c_str()));
+			result->messages = alpm_list_add(result->messages, strdup(("Release         : " + pkg.manifest.release).c_str()));
+			result->messages = alpm_list_add(result->messages, strdup(("Build           : " + pkg.manifest.build).c_str()));
+			result->messages = alpm_list_add(result->messages, strdup(("Installer Hash  : " + pkg.manifest.installer_hash).c_str()));
+			result->messages = alpm_list_add(result->messages, strdup(("Install Reason  : " + std::string(pkg.reason == InstallReason::Dependency ? "dependency" : "explicit")).c_str()));
+			if(pkg.has_explicit_uninstall) {
+				result->messages = alpm_list_add(result->messages, strdup(("Uninstall Cmd   : " + pkg.uninstall.command).c_str()));
+			}
+			if(!pkg.trace.registry_values.empty()) {
+				result->messages = alpm_list_add(result->messages, strdup("Registry Values : yes"));
+			}
 		} else if(list_mode) {
 			for(const auto& path : pkg.trace.paths) {
 				result->messages = alpm_list_add(result->messages, strdup((pkg.manifest.name + " " + path.path).c_str()));
