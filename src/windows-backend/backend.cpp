@@ -3,6 +3,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <sstream>
+#include <set>
 
 #include "json.hpp"
 #include "localdb.hpp"
@@ -12,7 +14,16 @@ using pacman::windows::LocalDatabase;
 using pacman::windows::ExtractedPackage;
 using pacman::windows::InstalledPackage;
 using pacman::windows::InstallReason;
+using pacman::windows::InstallerTrace;
+using pacman::windows::OwnedPath;
+using pacman::windows::OwnedRegistryValue;
 using pacman::windows::PackageSourceType;
+using pacman::windows::PathChange;
+using pacman::windows::RegistryEntry;
+using pacman::windows::RegistryChange;
+using pacman::windows::TraceChangeType;
+using pacman::windows::FileSnapshot;
+using pacman::windows::CommandExecution;
 
 static pm_winpkg_result_t *result_with_error(const char *message)
 {
@@ -95,6 +106,413 @@ static std::filesystem::path rooted_destination(const std::filesystem::path& roo
 	return root / destination;
 }
 
+static std::string relative_path_string(const std::filesystem::path& root, const std::filesystem::path& path)
+{
+	std::error_code ec;
+	auto relative = std::filesystem::relative(path, root, ec);
+	if(ec) {
+		return path.lexically_normal().string();
+	}
+	return relative.lexically_normal().string();
+}
+
+static std::string bytes_to_hex(const std::string& data)
+{
+	static const char hex[] = "0123456789abcdef";
+	std::string out;
+	out.reserve(data.size() * 2);
+	for(unsigned char c : data) {
+		out.push_back(hex[(c >> 4) & 0x0F]);
+		out.push_back(hex[c & 0x0F]);
+	}
+	return out;
+}
+
+static std::string read_small_file_hex(const std::filesystem::path& path)
+{
+	std::ifstream file(path, std::ios::binary);
+	if(!file) {
+		return "";
+	}
+	std::string data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+	return bytes_to_hex(data);
+}
+
+static FileSnapshot snapshot_path(const std::filesystem::path& path)
+{
+	FileSnapshot snapshot;
+	std::error_code ec;
+	auto status = std::filesystem::symlink_status(path, ec);
+	if(ec || status.type() == std::filesystem::file_type::not_found) {
+		return snapshot;
+	}
+	snapshot.exists = true;
+	snapshot.directory = std::filesystem::is_directory(status);
+	snapshot.symlink = std::filesystem::is_symlink(status);
+	snapshot.mode = static_cast<unsigned int>(status.permissions());
+	if(snapshot.symlink) {
+		snapshot.link_target = std::filesystem::read_symlink(path, ec).string();
+		return snapshot;
+	}
+	if(snapshot.directory) {
+		return snapshot;
+	}
+	if(std::filesystem::is_regular_file(status)) {
+		snapshot.hash = read_small_file_hex(path);
+		snapshot.content_hex = snapshot.hash;
+	}
+	return snapshot;
+}
+
+static std::map<std::string, FileSnapshot> snapshot_tree(
+	const std::filesystem::path& root,
+	const std::vector<std::string>& relative_roots)
+{
+	std::map<std::string, FileSnapshot> snapshot;
+	for(const auto& rel : relative_roots) {
+		auto base = rooted_destination(root, rel);
+		auto rel_name = relative_path_string(root, base);
+		auto base_snapshot = snapshot_path(base);
+		if(!base_snapshot.exists) {
+			continue;
+		}
+		snapshot[rel_name] = base_snapshot;
+		std::error_code ec;
+		if(!std::filesystem::is_directory(base, ec)) {
+			continue;
+		}
+		for(const auto& entry : std::filesystem::recursive_directory_iterator(base, ec)) {
+			if(ec) {
+				break;
+			}
+			snapshot[relative_path_string(root, entry.path())] = snapshot_path(entry.path());
+		}
+	}
+	return snapshot;
+}
+
+static std::vector<PathChange> diff_snapshot(
+	const std::map<std::string, FileSnapshot>& before,
+	const std::map<std::string, FileSnapshot>& after)
+{
+	std::set<std::string> keys;
+	for(const auto& [path, _] : before) {
+		keys.insert(path);
+	}
+	for(const auto& [path, _] : after) {
+		keys.insert(path);
+	}
+
+	std::vector<PathChange> changes;
+	for(const auto& key : keys) {
+		auto before_it = before.find(key);
+		auto after_it = after.find(key);
+		const bool existed_before = before_it != before.end() && before_it->second.exists;
+		const bool exists_after = after_it != after.end() && after_it->second.exists;
+		if(existed_before && exists_after) {
+			if(before_it->second.hash == after_it->second.hash
+					&& before_it->second.mode == after_it->second.mode
+					&& before_it->second.directory == after_it->second.directory
+					&& before_it->second.symlink == after_it->second.symlink
+					&& before_it->second.link_target == after_it->second.link_target) {
+				continue;
+			}
+			changes.push_back({key, TraceChangeType::Modified, before_it->second, after_it->second});
+		} else if(!existed_before && exists_after) {
+			changes.push_back({key, TraceChangeType::Created, {}, after_it->second});
+		} else if(existed_before && !exists_after) {
+			changes.push_back({key, TraceChangeType::Deleted, before_it->second, {}});
+		}
+	}
+	return changes;
+}
+
+static std::vector<OwnedRegistryValue> snapshot_registry_values(const std::vector<RegistryEntry>& manifest_registry)
+{
+	std::vector<OwnedRegistryValue> values;
+	for(const auto& reg : manifest_registry) {
+		values.push_back({reg.hive, reg.key, reg.name, reg.type, reg.value});
+	}
+	return values;
+}
+
+static std::vector<RegistryChange> diff_registry_values(
+	const std::vector<OwnedRegistryValue>& before,
+	const std::vector<OwnedRegistryValue>& after)
+{
+	auto map_key = [](const OwnedRegistryValue& value) {
+		return value.hive + "|" + value.key + "|" + value.name;
+	};
+	std::map<std::string, OwnedRegistryValue> before_map;
+	std::map<std::string, OwnedRegistryValue> after_map;
+	for(const auto& item : before) {
+		before_map[map_key(item)] = item;
+	}
+	for(const auto& item : after) {
+		after_map[map_key(item)] = item;
+	}
+
+	std::set<std::string> keys;
+	for(const auto& [key, _] : before_map) {
+		keys.insert(key);
+	}
+	for(const auto& [key, _] : after_map) {
+		keys.insert(key);
+	}
+
+	std::vector<RegistryChange> changes;
+	for(const auto& key : keys) {
+		auto before_it = before_map.find(key);
+		auto after_it = after_map.find(key);
+		if(before_it != before_map.end() && after_it != after_map.end()) {
+			if(before_it->second.type == after_it->second.type && before_it->second.value == after_it->second.value) {
+				continue;
+			}
+			changes.push_back({
+				TraceChangeType::Modified,
+				true,
+				true,
+				before_it->second,
+				after_it->second
+			});
+		} else if(before_it == before_map.end() && after_it != after_map.end()) {
+			changes.push_back({
+				TraceChangeType::Created,
+				false,
+				true,
+				{},
+				after_it->second
+			});
+		} else if(before_it != before_map.end() && after_it == after_map.end()) {
+			changes.push_back({
+				TraceChangeType::Deleted,
+				true,
+				false,
+				before_it->second,
+				{}
+			});
+		}
+	}
+	return changes;
+}
+
+static void add_trace_paths(InstallerTrace& trace, const std::vector<OwnedPath>& paths)
+{
+	std::set<std::string> seen;
+	for(const auto& path : trace.paths) {
+		seen.insert((path.directory ? "d:" : "f:") + path.path);
+	}
+	for(const auto& path : paths) {
+		auto key = (path.directory ? "d:" : "f:") + path.path;
+		if(seen.insert(key).second) {
+			trace.paths.push_back(path);
+		}
+	}
+}
+
+static void add_trace_registry_values(InstallerTrace& trace, const std::vector<OwnedRegistryValue>& values)
+{
+	std::set<std::string> seen;
+	for(const auto& value : trace.registry_values) {
+		seen.insert(value.hive + "|" + value.key + "|" + value.name + "|" + value.type + "|" + value.value);
+	}
+	for(const auto& value : values) {
+		auto key = value.hive + "|" + value.key + "|" + value.name + "|" + value.type + "|" + value.value;
+		if(seen.insert(key).second) {
+			trace.registry_values.push_back(value);
+		}
+	}
+}
+
+static std::string shell_quote(const std::string& value)
+{
+	std::string quoted = "'";
+	for(char c : value) {
+		if(c == '\'') {
+			quoted += "'\\''";
+		} else {
+			quoted += c;
+		}
+	}
+	quoted += "'";
+	return quoted;
+}
+
+static void add_registry_changes(InstallerTrace& trace, const std::vector<RegistryChange>& changes)
+{
+	trace.registry_changes = changes;
+}
+
+static void set_path_changes(InstallerTrace& trace, const std::vector<PathChange>& changes)
+{
+	trace.path_changes = changes;
+	for(const auto& change : changes) {
+		if(change.change_type == TraceChangeType::Created || change.change_type == TraceChangeType::Modified) {
+			add_trace_paths(trace, {{change.path, change.after.directory}});
+		}
+	}
+}
+
+static int execute_command(
+	const std::string& phase,
+	const std::string& executable,
+	const std::vector<std::string>& arguments,
+	const std::string& working_directory,
+	CommandExecution& execution)
+{
+	execution.phase = phase;
+	execution.executable = executable;
+	execution.arguments = arguments;
+	execution.working_directory = working_directory;
+	std::string command;
+	if(!working_directory.empty()) {
+		command = "cd " + shell_quote(working_directory) + " && ";
+	}
+	command += "\"" + executable + "\"";
+	for(const auto& arg : arguments) {
+		command += " \"" + arg + "\"";
+	}
+	int exit_code = std::system(command.c_str());
+	execution.exit_code = exit_code;
+	execution.status = exit_code == 0 ? "ok" : "failed";
+	return exit_code;
+}
+
+static bool ensure_cached_sync_package(alpm_handle_t *handle, alpm_pkg_t *pkg, std::string& error)
+{
+	const char *filename = alpm_pkg_get_filename(pkg);
+	if(filename == NULL) {
+		error = "sync target has no filename";
+		return false;
+	}
+
+	const alpm_list_t *cachedirs = alpm_option_get_cachedirs(handle);
+	if(cachedirs == NULL) {
+		error = "no cache directory configured";
+		return false;
+	}
+
+	for(const alpm_list_t *i = cachedirs; i; i = i->next) {
+		auto path = std::filesystem::path((const char *)i->data) / filename;
+		std::error_code ec;
+		if(std::filesystem::is_regular_file(path, ec)) {
+			return true;
+		}
+	}
+
+	alpm_list_t *urls = NULL;
+	alpm_list_t *fetched = NULL;
+	alpm_db_t *db = alpm_pkg_get_db(pkg);
+	auto append_urls = [&](alpm_list_t *servers) {
+		for(alpm_list_t *i = servers; i; i = i->next) {
+			std::string url = (const char *)i->data;
+			if(!url.empty() && url.back() != '/') {
+				url += '/';
+			}
+			urls = alpm_list_add(urls, strdup((url + filename).c_str()));
+		}
+	};
+	append_urls(alpm_db_get_cache_servers(db));
+	append_urls(alpm_db_get_servers(db));
+	if(urls == NULL) {
+		error = "no server configured for sync package download";
+		return false;
+	}
+	if(alpm_fetch_pkgurl(handle, urls, &fetched) != 0) {
+		error = "failed to download sync package";
+		FREELIST(urls);
+		FREELIST(fetched);
+		return false;
+	}
+	FREELIST(urls);
+	FREELIST(fetched);
+	return true;
+}
+
+static std::filesystem::path resolve_cached_sync_package_path(alpm_handle_t *handle, alpm_pkg_t *pkg)
+{
+	const char *filename = alpm_pkg_get_filename(pkg);
+	if(filename == NULL) {
+		return {};
+	}
+
+	auto root = handle_root(handle);
+	for(const alpm_list_t *i = alpm_option_get_cachedirs(handle); i; i = i->next) {
+		std::filesystem::path cachedir((const char *)i->data);
+		std::filesystem::path candidate = cachedir / filename;
+		std::error_code ec;
+		if(std::filesystem::is_regular_file(candidate, ec)) {
+			return candidate;
+		}
+		if(!cachedir.is_absolute()) {
+			candidate = root / cachedir / filename;
+			ec.clear();
+			if(std::filesystem::is_regular_file(candidate, ec)) {
+				return candidate;
+			}
+		}
+	}
+	return {};
+}
+
+static bool cleanup_tracked_path(const std::filesystem::path& root, const PathChange& change)
+{
+	std::error_code ec;
+	auto path = rooted_destination(root, change.path);
+	if(!std::filesystem::exists(path, ec) && !std::filesystem::is_symlink(path, ec)) {
+		return true;
+	}
+	if(change.after.directory) {
+		std::filesystem::remove_all(path, ec);
+		return !ec;
+	}
+	std::filesystem::remove(path, ec);
+	return !ec;
+}
+
+static bool registry_state_exists(const std::filesystem::path& root, const std::string& package_name)
+{
+	std::error_code ec;
+	auto registry_path = root / "var" / "lib" / "pacman" / "windows-registry" / (package_name + ".json");
+	return std::filesystem::is_regular_file(registry_path, ec);
+}
+
+static bool registry_state_contains_tracked_values(
+	const std::filesystem::path& root,
+	const std::string& package_name,
+	const std::vector<OwnedRegistryValue>& values)
+{
+	auto registry_path = root / "var" / "lib" / "pacman" / "windows-registry" / (package_name + ".json");
+	std::ifstream file(registry_path);
+	if(!file) {
+		return false;
+	}
+
+	nlohmann::json json;
+	try {
+		file >> json;
+	} catch(...) {
+		return true;
+	}
+
+	std::set<std::string> current;
+	for(const auto& item : json) {
+		current.insert(
+			item.value("hive", "") + "|" +
+			item.value("key", "") + "|" +
+			item.value("name", "") + "|" +
+			item.value("type", "") + "|" +
+			item.value("value", ""));
+	}
+	for(const auto& value : values) {
+		auto key = value.hive + "|" + value.key + "|" + value.name + "|" + value.type + "|" + value.value;
+		if(current.count(key)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 int pm_windows_backend_enabled(void)
 {
 	const char *forced = getenv("PACMAN_WIN_BACKEND");
@@ -156,6 +574,10 @@ static pm_winpkg_result_t *install_extracted(LocalDatabase& db, const ExtractedP
 	for(const auto& shortcut : extracted.manifest.shortcuts) {
 		installed.trace.shortcuts.push_back(shortcut.path);
 	}
+	if(extracted.manifest.trace_scope.has_value()) {
+		installed.trace.trace_roots = extracted.manifest.trace_scope->roots;
+		installed.trace.trace_registry_keys = extracted.manifest.trace_scope->registry_keys;
+	}
 
 	if(extracted.manifest.source_type == PackageSourceType::Payload) {
 		for(const auto& entry : extracted.manifest.files) {
@@ -167,26 +589,58 @@ static pm_winpkg_result_t *install_extracted(LocalDatabase& db, const ExtractedP
 			}
 			installed.trace.paths.push_back({entry.destination, entry.directory});
 		}
+		for(const auto& path : installed.trace.paths) {
+			PathChange change;
+			change.path = path.path;
+			change.change_type = TraceChangeType::Created;
+			change.after.exists = true;
+			change.after.directory = path.directory;
+			installed.trace.path_changes.push_back(std::move(change));
+		}
+		installed.trace.registry_changes = diff_registry_values({}, installed.trace.registry_values);
 	} else if(extracted.manifest.installer.has_value()) {
 		const auto& installer = *extracted.manifest.installer;
 		installed.has_explicit_uninstall = installer.uninstall.has_value();
 		if(installer.uninstall.has_value()) {
 			installed.uninstall = *installer.uninstall;
 		}
-		std::string command = "\"" + (extracted.extracted_root / installer.executable).string() + "\"";
-		for(const auto& arg : installer.arguments) {
-			command += " \"" + arg + "\"";
-		}
-		if(std::system(command.c_str()) != 0) {
+		auto before_paths = snapshot_tree(db.root(), installed.trace.trace_roots);
+		auto before_registry = installed.trace.registry_values;
+		CommandExecution execution;
+		auto executable = (extracted.extracted_root / installer.executable).string();
+		auto working_directory = installer.working_directory.empty()
+			? extracted.extracted_root.string()
+			: (extracted.extracted_root / installer.working_directory).string();
+		if(execute_command("install", executable, installer.arguments, working_directory, execution) != 0) {
+			installed.trace.command_results.push_back(execution);
+			installed.install_status = "install-command-failed";
+			installed.last_error = "wrapped installer returned non-zero status";
+			std::vector<std::string> save_errors;
+			db.save_package(installed, save_errors);
 			return result_with_error("wrapped installer returned non-zero status");
 		}
-		installed.trace.child_processes.push_back(command);
-		installed.trace.paths.push_back({
-			installer.working_directory.empty()
-				? extracted.extracted_root.string()
-				: installer.working_directory,
-			true
-		});
+		installed.trace.command_results.push_back(execution);
+		installed.trace.child_processes.push_back(executable);
+		auto after_paths = snapshot_tree(db.root(), installed.trace.trace_roots);
+		auto after_registry = snapshot_registry_values(extracted.manifest.registry);
+		set_path_changes(installed.trace, diff_snapshot(before_paths, after_paths));
+		auto registry_changes = diff_registry_values(before_registry, after_registry);
+		add_registry_changes(installed.trace, registry_changes);
+		std::vector<OwnedRegistryValue> active_registry;
+		for(const auto& change : registry_changes) {
+			if(change.exists_after) {
+				active_registry.push_back(change.after);
+			}
+		}
+		add_trace_registry_values(installed.trace, active_registry);
+		if(installed.trace.paths.empty()) {
+			installed.trace.paths.push_back({
+				installer.working_directory.empty()
+					? extracted.extracted_root.string()
+					: installer.working_directory,
+				true
+			});
+		}
 	}
 
 	if(!installed.trace.registry_values.empty()) {
@@ -212,6 +666,8 @@ static pm_winpkg_result_t *install_extracted(LocalDatabase& db, const ExtractedP
 		}
 		regfile << registry.dump(2);
 	}
+	installed.install_status = "installed";
+	installed.uninstall_status = "not-run";
 
 	std::vector<std::string> save_errors;
 	if(!db.save_package(installed, save_errors)) {
@@ -237,12 +693,21 @@ pm_winpkg_result_t *pm_windows_sync_execute(alpm_handle_t *handle, alpm_list_t *
 	pm_winpkg_result_t *result = result_ok();
 	for(alpm_list_t *i = targets; i; i = i->next) {
 		alpm_pkg_t *pkg = (alpm_pkg_t *)i->data;
+		std::string ensure_error;
+		if(!ensure_cached_sync_package(handle, pkg, ensure_error)) {
+			pm_windows_result_free(result);
+			return result_with_error(ensure_error.c_str());
+		}
 		const char *filename = alpm_pkg_get_filename(pkg);
 		if(filename == NULL) {
 			pm_windows_result_free(result);
 			return result_with_error("sync target has no filename");
 		}
-		auto pkg_path = std::filesystem::path((const char *)cachedirs->data) / filename;
+		auto pkg_path = resolve_cached_sync_package_path(handle, pkg);
+		if(pkg_path.empty()) {
+			pm_windows_result_free(result);
+			return result_with_error("sync package not found in cache after download");
+		}
 		ExtractedPackage extracted;
 		std::vector<std::string> extract_errors;
 		auto workdir = db.root() / "var" / "tmp" / ("extract-" + std::string(alpm_pkg_get_name(pkg)));
@@ -310,9 +775,12 @@ pm_winpkg_result_t *pm_windows_remove_execute(alpm_handle_t *handle, alpm_list_t
 		bool changed = true;
 		while(changed) {
 			changed = false;
-			for(const auto *orphan : db.orphans()) {
-				if(!removing.count(orphan->manifest.name)) {
-					removing.insert(orphan->manifest.name);
+			for(const auto& [name, pkg] : db.packages()) {
+				if(pkg.reason != InstallReason::Dependency || removing.count(name)) {
+					continue;
+				}
+				if(!db.is_required_by_other(name, removing)) {
+					removing.insert(name);
 					changed = true;
 				}
 			}
@@ -320,31 +788,83 @@ pm_winpkg_result_t *pm_windows_remove_execute(alpm_handle_t *handle, alpm_list_t
 	}
 
 	for(const auto& target_name : removing) {
-		const InstalledPackage *installed = db.find_installed(target_name);
-		if(!installed) {
+		const InstalledPackage *installed_view = db.find_installed(target_name);
+		if(!installed_view) {
 			return result_with_error("target not installed");
 		}
+		InstalledPackage installed = *installed_view;
+		const InstalledPackage *installed_ptr = &installed;
 		if(db.is_required_by_other(target_name, removing) && !(flags & ALPM_TRANS_FLAG_RECURSE)) {
 			return result_with_error("package is still required by another installed package");
 		}
-		if(installed->has_explicit_uninstall && !installed->uninstall.command.empty()) {
-			std::string command = "\"" + installed->uninstall.command + "\"";
-			for(const auto& arg : installed->uninstall.arguments) {
-				command += " \"" + arg + "\"";
+		if(installed_ptr->has_explicit_uninstall && !installed_ptr->uninstall.command.empty()) {
+			CommandExecution execution;
+			std::string working_directory;
+			if(!installed_ptr->uninstall.working_directory.empty()) {
+				working_directory = rooted_destination(db.root(), installed_ptr->uninstall.working_directory).string();
 			}
-			std::system(command.c_str());
+			int exit_code = execute_command(
+				"uninstall",
+				installed_ptr->uninstall.command,
+				installed_ptr->uninstall.arguments,
+				working_directory,
+				execution);
+			installed.trace.command_results.push_back(execution);
+			if(exit_code != 0) {
+				installed.uninstall_status = "command-failed";
+				installed.last_error = "explicit uninstall command failed";
+				std::vector<std::string> save_errors;
+				db.save_package(installed, save_errors);
+				return result_with_error("explicit uninstall command failed");
+			}
 		}
-		for(const auto& path : installed->trace.paths) {
-			std::error_code ec;
-			std::filesystem::remove_all(rooted_destination(db.root(), path.path), ec);
+		auto before_cleanup = snapshot_tree(db.root(), installed.trace.trace_roots);
+		bool cleanup_failed = false;
+		for(const auto& change : installed.trace.path_changes) {
+			if(!cleanup_tracked_path(db.root(), change)) {
+				cleanup_failed = true;
+			}
 		}
-		for(const auto& shortcut : installed->trace.shortcuts) {
+		for(const auto& shortcut : installed.trace.shortcuts) {
 			std::error_code ec;
 			std::filesystem::remove(rooted_destination(db.root(), shortcut), ec);
+			if(ec) {
+				cleanup_failed = true;
+			}
 		}
-		if(!installed->trace.registry_values.empty()) {
+		auto after_cleanup = snapshot_tree(db.root(), installed.trace.trace_roots);
+		auto residual_changes = diff_snapshot(before_cleanup, after_cleanup);
+		std::vector<PathChange> residual_present;
+		for(const auto& change : residual_changes) {
+			if(change.after.exists) {
+				residual_present.push_back(change);
+			}
+		}
+		if(cleanup_failed || !residual_present.empty()) {
+			installed.uninstall_status = cleanup_failed ? "cleanup-failed" : "residuals-remain";
+			installed.last_error = cleanup_failed ? "failed to clean tracked filesystem paths" : "tracked filesystem residuals remain after uninstall";
+			std::vector<std::string> save_errors;
+			db.save_package(installed, save_errors);
+			return result_with_error(installed.last_error.c_str());
+		}
+		if(!installed.trace.registry_values.empty()) {
+			if(registry_state_contains_tracked_values(db.root(), installed.manifest.name, installed.trace.registry_values)) {
+				installed.uninstall_status = "registry-residuals-remain";
+				installed.last_error = "tracked registry residuals remain after uninstall";
+				std::vector<std::string> save_errors;
+				db.save_package(installed, save_errors);
+				return result_with_error("tracked registry residuals remain after uninstall");
+			}
 			std::error_code ec;
-			std::filesystem::remove(db.root() / "var" / "lib" / "pacman" / "windows-registry" / (installed->manifest.name + ".json"), ec);
+			auto registry_state_path = db.root() / "var" / "lib" / "pacman" / "windows-registry" / (installed.manifest.name + ".json");
+			std::filesystem::remove(registry_state_path, ec);
+			if(ec) {
+				installed.uninstall_status = "registry-cleanup-failed";
+				installed.last_error = "failed to remove registry state file";
+				std::vector<std::string> save_errors;
+				db.save_package(installed, save_errors);
+				return result_with_error("failed to remove registry state file");
+			}
 		}
 		std::vector<std::string> remove_errors;
 		if(!db.remove_package(target_name, remove_errors)) {
@@ -380,11 +900,19 @@ pm_winpkg_result_t *pm_windows_query_execute(alpm_handle_t *handle, alpm_list_t 
 			result->messages = alpm_list_add(result->messages, strdup(("Build           : " + pkg.manifest.build).c_str()));
 			result->messages = alpm_list_add(result->messages, strdup(("Installer Hash  : " + pkg.manifest.installer_hash).c_str()));
 			result->messages = alpm_list_add(result->messages, strdup(("Install Reason  : " + std::string(pkg.reason == InstallReason::Dependency ? "dependency" : "explicit")).c_str()));
+			result->messages = alpm_list_add(result->messages, strdup(("Install Status  : " + pkg.install_status).c_str()));
+			result->messages = alpm_list_add(result->messages, strdup(("Uninstall State : " + pkg.uninstall_status).c_str()));
 			if(pkg.has_explicit_uninstall) {
 				result->messages = alpm_list_add(result->messages, strdup(("Uninstall Cmd   : " + pkg.uninstall.command).c_str()));
 			}
 			if(!pkg.trace.registry_values.empty()) {
 				result->messages = alpm_list_add(result->messages, strdup("Registry Values : yes"));
+			}
+			if(!pkg.trace.trace_roots.empty()) {
+				result->messages = alpm_list_add(result->messages, strdup(("Trace Roots     : " + std::to_string(pkg.trace.trace_roots.size())).c_str()));
+			}
+			if(!pkg.trace.command_results.empty()) {
+				result->messages = alpm_list_add(result->messages, strdup(("Tracked Procs   : " + std::to_string(pkg.trace.command_results.size())).c_str()));
 			}
 		} else if(list_mode) {
 			for(const auto& path : pkg.trace.paths) {

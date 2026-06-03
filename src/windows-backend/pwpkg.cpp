@@ -11,7 +11,16 @@ namespace windows {
 
 static Dependency parse_dep(const std::string& value)
 {
-	return Dependency{value, value};
+	std::string name = value;
+	const std::string operators[] = {">=", "<=", "=", ">", "<"};
+	for(const auto& op : operators) {
+		std::size_t pos = value.find(op);
+		if(pos != std::string::npos) {
+			name = value.substr(0, pos);
+			break;
+		}
+	}
+	return Dependency{name, value};
 }
 
 bool windows_pkg_is_pwpkg(const char *target)
@@ -78,6 +87,13 @@ bool windows_pkg_read_manifest(const std::filesystem::path& path, PackageManifes
 			item.value("path", ""),
 			item.value("target", "")
 		});
+	}
+	if(json.contains("trace_scope")) {
+		TraceScope scope;
+		const auto& trace_scope = json["trace_scope"];
+		scope.roots = trace_scope.value("roots", std::vector<std::string>{});
+		scope.registry_keys = trace_scope.value("registry_keys", std::vector<std::string>{});
+		manifest.trace_scope = scope;
 	}
 	if(json.contains("installer")) {
 		InstallerSpec spec;
@@ -156,6 +172,12 @@ bool windows_pkg_extract(
 			}
 			out.write(buffer, read);
 		}
+		out.close();
+		std::filesystem::permissions(
+			out_path,
+			static_cast<std::filesystem::perms>(archive_entry_perm(entry)),
+			std::filesystem::perm_options::replace,
+			ec);
 	}
 	archive_read_close(ar);
 	archive_read_free(ar);

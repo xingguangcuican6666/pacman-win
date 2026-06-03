@@ -189,10 +189,16 @@ class pmdb(object):
     #
     def db_write(self, pkg):
         entry = {}
+        version = pkg.version
+        filename = pkg.filename()
+        if getattr(pkg, "package_format", "alpm") == "pwpkg":
+            version, release = pkg.version_tuple()
+            version = "%s-%s" % (version, pkg.release or release)
+            filename = pkg.windows_manifest()["filename"]
         # desc/depends type entries
         data = []
         make_section(data, "NAME", pkg.name)
-        make_section(data, "VERSION", pkg.version)
+        make_section(data, "VERSION", version)
         make_section(data, "DESC", pkg.desc)
         make_section(data, "GROUPS", pkg.groups)
         make_section(data, "LICENSE", pkg.license)
@@ -209,7 +215,7 @@ class pmdb(object):
             make_section(data, "SIZE", pkg.size)
             make_section(data, "REASON", pkg.reason)
         else:
-            make_section(data, "FILENAME", pkg.filename())
+            make_section(data, "FILENAME", filename)
             make_section(data, "REPLACES", pkg.replaces)
             make_section(data, "CSIZE", pkg.csize)
             make_section(data, "ISIZE", pkg.isize)

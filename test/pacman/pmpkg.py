@@ -15,6 +15,7 @@
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from io import BytesIO
+import json
 import os
 import tarfile
 
@@ -28,6 +29,7 @@ class pmpkg(object):
 
     def __init__(self, name, version = "1.0-1"):
         self.path = "" #the path of the generated package
+        self.package_format = "alpm"
         # desc
         self.name = name
         self.version = version
@@ -64,6 +66,17 @@ class pmpkg(object):
         }
         self.path = None
         self.finalized = False
+        # windows package metadata
+        self.release = None
+        self.build = "1"
+        self.installer_hash = ""
+        self.source_type = "payload"
+        self.registry = []
+        self.shortcuts = []
+        self.trace_roots = []
+        self.trace_registry_keys = []
+        self.installer = None
+        self.archive_entries = {}
 
     def __str__(self):
         s = ["%s" % self.fullname()]
@@ -85,7 +98,167 @@ class pmpkg(object):
 
         Returns a string formatted as follows: "pkgname-pkgver.PKG_EXT_PKG".
         """
-        return "%s%s" % (self.fullname(), util.PM_EXT_PKG)
+        ext = util.PM_EXT_WINPKG if self.package_format == "pwpkg" else util.PM_EXT_PKG
+        return "%s%s" % (self.fullname(), ext)
+
+    def version_tuple(self):
+        if "-" in self.version:
+            version, release = self.version.rsplit("-", 1)
+            return version, release
+        return self.version, "1"
+
+    def windows_manifest(self):
+        version, default_release = self.version_tuple()
+        manifest = {
+            "name": self.name,
+            "version": version,
+            "release": self.release or default_release,
+            "build": self.build,
+            "installer_hash": self.installer_hash,
+            "repo": "sync",
+            "desc": self.desc,
+            "arch": self.arch or "any",
+            "filename": self.filename(),
+            "source_type": self.source_type,
+            "depends": list(self.depends),
+            "provides": list(self.provides),
+            "registry": list(self.registry),
+            "shortcuts": list(self.shortcuts),
+        }
+        if self.trace_roots or self.trace_registry_keys:
+            manifest["trace_scope"] = {
+                "roots": list(self.trace_roots),
+                "registry_keys": list(self.trace_registry_keys),
+            }
+        if self.source_type == "payload":
+            manifest["files"] = []
+            for name in self.files:
+                fileinfo = util.getfileinfo(name)
+                manifest["files"].append({
+                    "source": fileinfo["filename"],
+                    "destination": fileinfo["filename"],
+                    "directory": fileinfo["isdir"],
+                })
+        if self.installer:
+            manifest["installer"] = self.installer
+        return manifest
+
+    def windows_local_state(self, reason="explicit"):
+        manifest = self.windows_manifest()
+        trace_paths = []
+        path_changes = []
+        if self.source_type == "payload":
+            for name in self.files:
+                fileinfo = util.getfileinfo(name)
+                trace_paths.append({
+                    "path": fileinfo["filename"],
+                    "directory": fileinfo["isdir"],
+                })
+                path_changes.append({
+                    "path": fileinfo["filename"],
+                    "change_type": "created",
+                    "before": {
+                        "exists": False,
+                        "directory": False,
+                        "symlink": False,
+                        "mode": 0,
+                        "hash": "",
+                        "content_hex": "",
+                        "link_target": "",
+                    },
+                    "after": {
+                        "exists": True,
+                        "directory": fileinfo["isdir"],
+                        "symlink": fileinfo["islink"],
+                        "mode": fileinfo["perms"] if fileinfo["hasperms"] else (0o755 if fileinfo["isdir"] else 0o644),
+                        "hash": "",
+                        "content_hex": "",
+                        "link_target": fileinfo["link"] if fileinfo["islink"] else "",
+                    },
+                })
+        else:
+            for name in self.files:
+                fileinfo = util.getfileinfo(name)
+                trace_paths.append({
+                    "path": fileinfo["filename"],
+                    "directory": fileinfo["isdir"],
+                })
+                path_changes.append({
+                    "path": fileinfo["filename"],
+                    "change_type": "created",
+                    "before": {
+                        "exists": False,
+                        "directory": False,
+                        "symlink": False,
+                        "mode": 0,
+                        "hash": "",
+                        "content_hex": "",
+                        "link_target": "",
+                    },
+                    "after": {
+                        "exists": True,
+                        "directory": fileinfo["isdir"],
+                        "symlink": fileinfo["islink"],
+                        "mode": fileinfo["perms"] if fileinfo["hasperms"] else (0o755 if fileinfo["isdir"] else 0o644),
+                        "hash": "",
+                        "content_hex": "",
+                        "link_target": fileinfo["link"] if fileinfo["islink"] else "",
+                    },
+                })
+        registry_changes = []
+        for item in manifest.get("registry", []):
+            registry_changes.append({
+                "change_type": "created",
+                "existed_before": False,
+                "exists_after": True,
+                "before": {
+                    "hive": item["hive"],
+                    "key": item["key"],
+                    "name": item["name"],
+                    "type": "",
+                    "value": "",
+                },
+                "after": item,
+            })
+        return {
+            "name": manifest["name"],
+            "version": manifest["version"],
+            "release": manifest["release"],
+            "build": manifest["build"],
+            "installer_hash": manifest["installer_hash"],
+            "repo": manifest["repo"],
+            "desc": manifest["desc"],
+            "arch": manifest["arch"],
+            "filename": manifest["filename"],
+            "source_type": manifest["source_type"],
+            "depends": [{"name": dep, "original": dep} for dep in manifest["depends"]],
+            "provides": [{"name": dep, "original": dep} for dep in manifest["provides"]],
+            "files": manifest.get("files", []),
+            "registry": manifest.get("registry", []),
+            "shortcuts": manifest.get("shortcuts", []),
+            "trace_scope": manifest.get("trace_scope", {}),
+            "reason": reason,
+            "trace": {
+                "paths": trace_paths,
+                "registry_values": list(manifest.get("registry", [])),
+                "shortcuts": [item["path"] for item in manifest.get("shortcuts", [])],
+                "child_processes": [],
+                "trace_roots": list(self.trace_roots),
+                "trace_registry_keys": list(self.trace_registry_keys),
+                "path_changes": path_changes,
+                "registry_changes": registry_changes,
+                "command_results": [],
+            },
+            "uninstall": {
+                "command": self.installer.get("uninstall", {}).get("command", "") if self.installer else "",
+                "working_directory": self.installer.get("uninstall", {}).get("working_directory", "") if self.installer else "",
+                "arguments": self.installer.get("uninstall", {}).get("arguments", []) if self.installer else [],
+            },
+            "has_explicit_uninstall": bool(self.installer and self.installer.get("uninstall")),
+            "install_status": "installed",
+            "uninstall_status": "not-run",
+            "last_error": "",
+        }
 
     @staticmethod
     def parse_filename(name):
@@ -109,6 +282,9 @@ class pmpkg(object):
         A package archive is generated in the location 'path', based on the data
         from the object.
         """
+        if self.package_format == "pwpkg":
+            return self.makepwpkg(path=path, fileobj=fileobj)
+
         archive_files = []
 
         # .PKGINFO
@@ -174,6 +350,51 @@ class pmpkg(object):
                 filedata = name + "\n"
                 info.size = len(filedata)
                 tar.addfile(info, BytesIO(filedata.encode('utf8')))
+
+        tar.close()
+
+    def makepwpkg(self, path=None, fileobj=None):
+        manifest = json.dumps(self.windows_manifest(), indent=2)
+
+        if path:
+            self.path = os.path.join(path, self.filename())
+            util.mkdir(os.path.dirname(self.path))
+
+        tar = tarfile.open(name=self.path, fileobj=fileobj, mode="w:gz", format=tarfile.GNU_FORMAT)
+        manifest_info = tarfile.TarInfo("manifest.json")
+        manifest_info.size = len(manifest.encode('utf8'))
+        tar.addfile(manifest_info, BytesIO(manifest.encode('utf8')))
+
+        if self.source_type == "payload":
+            payload_dir = tarfile.TarInfo("payload")
+            payload_dir.type = tarfile.DIRTYPE
+            tar.addfile(payload_dir)
+            for name in self.files:
+                fileinfo = util.getfileinfo(name)
+                archive_name = os.path.join("payload", fileinfo["filename"])
+                info = tarfile.TarInfo(archive_name)
+                if fileinfo["hasperms"]:
+                    info.mode = fileinfo["perms"]
+                elif fileinfo["isdir"]:
+                    info.mode = 0o755
+                if fileinfo["isdir"]:
+                    info.type = tarfile.DIRTYPE
+                    tar.addfile(info)
+                elif fileinfo["islink"]:
+                    info.type = tarfile.SYMTYPE
+                    info.linkname = fileinfo["link"]
+                    tar.addfile(info)
+                else:
+                    filedata = name + "\n"
+                    info.size = len(filedata)
+                    tar.addfile(info, BytesIO(filedata.encode('utf8')))
+
+        for archive_name, data in self.archive_entries.items():
+            encoded = data.encode('utf8')
+            info = tarfile.TarInfo(archive_name)
+            info.size = len(encoded)
+            info.mode = 0o755 if archive_name.endswith(".sh") else 0o644
+            tar.addfile(info, BytesIO(encoded))
 
         tar.close()
 

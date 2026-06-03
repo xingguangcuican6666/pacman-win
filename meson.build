@@ -377,7 +377,7 @@ pacman_bin = executable(
 
 executable(
   'pacman-conf',
-  pacman_conf_sources,
+  pacman_conf_sources + windows_backend_sources,
   include_directories : includes,
   link_with : [libalpm, libcommon],
   dependencies : [libarchive],

@@ -38,6 +38,11 @@ struct ShortcutSpec {
 	std::string target;
 };
 
+struct TraceScope {
+	std::vector<std::string> roots;
+	std::vector<std::string> registry_keys;
+};
+
 struct UninstallRecord {
 	std::string command;
 	std::string working_directory;
@@ -67,6 +72,7 @@ struct PackageManifest {
 	std::vector<FileEntry> files;
 	std::vector<RegistryEntry> registry;
 	std::vector<ShortcutSpec> shortcuts;
+	std::optional<TraceScope> trace_scope;
 	std::optional<InstallerSpec> installer;
 };
 

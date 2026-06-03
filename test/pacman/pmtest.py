@@ -22,6 +22,7 @@ import stat
 import subprocess
 import threading
 import time
+import json
 
 import pmrule
 import pmserve
@@ -65,6 +66,9 @@ class pmtest(object):
     def addpkg(self, pkg):
         self.localpkgs.append(pkg)
 
+    def addwinlocalpkg(self, pkg, reason="explicit"):
+        self.windows_localpkgs.append((pkg, reason))
+
     def findpkg(self, name, version, allow_local=False):
         """Find a package object matching the name and version specified in
         either sync databases or the local package collection. The local database
@@ -98,8 +102,10 @@ class pmtest(object):
             "local": pmdb.pmdb("local", self.root)
         }
         self.localpkgs = []
+        self.windows_localpkgs = []
         self.createlocalpkgs = False
         self.filesystem = []
+        self.windows_backend = False
 
         self.description = ""
         self.option = {}
@@ -203,6 +209,18 @@ class pmtest(object):
         if self.db["local"].pkgs and self.dbver >= 9:
             path = os.path.join(self.root, util.PM_DBPATH, "local")
             util.mkfile(path, "ALPM_DB_VERSION", str(self.dbver))
+        if self.windows_localpkgs:
+            state_dir = os.path.join(self.root, util.PM_DBPATH, "windows-local")
+            reg_dir = os.path.join(self.root, util.PM_DBPATH, "windows-registry")
+            util.mkdir(state_dir)
+            util.mkdir(reg_dir)
+            for pkg, reason in self.windows_localpkgs:
+                state_path = os.path.join(state_dir, "%s.json" % pkg.name)
+                util.writedata(state_path, json.dumps(pkg.windows_local_state(reason=reason), indent=2))
+                if pkg.registry:
+                    reg_path = os.path.join(reg_dir, "%s.json" % pkg.name)
+                    util.writedata(reg_path, json.dumps(pkg.registry, indent=2))
+                pkg.install_package(self.root)
 
         # Done.
         vprint("    Taking a snapshot of the file system")
@@ -300,7 +318,8 @@ class pmtest(object):
         # archives are made available more easily.
         time_start = time.time()
         self.retcode = subprocess.call(cmd, stdout=output, stderr=output,
-                cwd=os.path.join(self.root, util.TMPDIR), env={'LC_ALL': 'C', **self.env})
+                cwd=os.path.join(self.root, util.TMPDIR),
+                env={'LC_ALL': 'C', **({'PACMAN_WIN_BACKEND': '1'} if self.windows_backend else {}), **self.env})
         time_end = time.time()
         vprint("\ttime elapsed: %.2fs" % (time_end - time_start))
 

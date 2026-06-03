@@ -194,6 +194,20 @@ class pmrule(object):
                         success = f.read() == value
                 except:
                     success = 0
+        elif kind == "STATE":
+            filename = os.path.join(test.root, util.PM_DBPATH, key)
+            if case == "EXIST":
+                if not os.path.isfile(filename):
+                    success = 0
+            elif case == "CONTENTS":
+                try:
+                    with open(filename, 'r') as f:
+                        success = value in f.read()
+                except:
+                    success = 0
+            else:
+                tap.diag("STATE rule '%s' not found" % case)
+                success = -1
         else:
             tap.diag("Rule kind '%s' not found" % kind)
             success = -1

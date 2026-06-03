@@ -1,0 +1,62 @@
+name: Windows Backend
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            meson ninja-build pkg-config gettext \
+            libarchive-dev libcurl4-openssl-dev libgpgme-dev \
+            libssl-dev libseccomp-dev bash fakeroot
+
+      - name: Configure
+        run: meson setup build
+
+      - name: Build
+        run: meson compile -C build
+
+      - name: Run Windows Backend Pactests
+        run: |
+          python3 test/pacman/pactest.py \
+            --bindir build \
+            --ldconfig /sbin/ldconfig \
+            --scriptlet-shell /bin/sh \
+            test/pacman/tests/windows-upgrade-basic.py \
+            test/pacman/tests/windows-sync-basic.py \
+            test/pacman/tests/windows-query-reason.py \
+            test/pacman/tests/windows-query-deps.py \
+            test/pacman/tests/windows-remove-recursive.py \
+            test/pacman/tests/windows-wrapped-installer.py \
+            test/pacman/tests/windows-wrapped-installer-modify.py \
+            test/pacman/tests/windows-wrapped-installer-fail.py \
+            test/pacman/tests/windows-wrapped-remove.py \
+            test/pacman/tests/windows-wrapped-remove-fail.py \
+            test/pacman/tests/windows-wrapped-remove-registry-residual.py
+
+      - name: Run Meson Test Targets
+        run: |
+          meson test -C build \
+            'pacman:windows-upgrade-basic.py' \
+            'pacman:windows-sync-basic.py' \
+            'pacman:windows-query-reason.py' \
+            'pacman:windows-query-deps.py' \
+            'pacman:windows-remove-recursive.py' \
+            'pacman:windows-wrapped-installer.py' \
+            'pacman:windows-wrapped-installer-modify.py' \
+            'pacman:windows-wrapped-installer-fail.py' \
+            'pacman:windows-wrapped-remove.py' \
+            'pacman:windows-wrapped-remove-fail.py' \
+            'pacman:windows-wrapped-remove-registry-residual.py' \
+            --print-errorlogs
