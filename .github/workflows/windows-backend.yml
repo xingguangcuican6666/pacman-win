@@ -49,3 +49,30 @@ jobs:
             test/pacman/tests/windows-wrapped-remove.py \
             test/pacman/tests/windows-wrapped-remove-fail.py \
             test/pacman/tests/windows-wrapped-remove-registry-residual.py
+
+      - name: Collect Build Artifacts
+        if: always()
+        run: |
+          rm -rf dist
+          mkdir -p dist/bin dist/lib dist/scripts
+
+          cp build/pacman dist/bin/
+          cp build/pacman-conf dist/bin/
+          cp build/vercmp dist/bin/
+          cp build/testpkg dist/bin/
+          cp build/makepkg dist/bin/
+          cp build/pacman-key dist/bin/
+          cp build/pacman-db-upgrade dist/bin/
+          cp build/repo-add dist/bin/
+          cp build/repo-remove dist/bin/
+          cp build/repo-elephant dist/bin/
+          cp build/libalpm.so.16.0.1 dist/lib/
+          cp -a build/scripts/. dist/scripts/
+
+      - name: Upload Build Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-backend-build-${{ github.sha }}
+          path: dist
+          if-no-files-found: error
