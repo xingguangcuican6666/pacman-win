@@ -35,10 +35,10 @@
 #include <sys/socket.h>
 #include <pwd.h>
 #include <fnmatch.h>
+#include <poll.h>
 #endif
 #include <sys/types.h>
 #include <fcntl.h>
-#include <poll.h>
 #include <signal.h>
 
 /* libarchive */
