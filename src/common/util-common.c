@@ -225,6 +225,206 @@ int pm_fnmatch(const char *pattern, const char *string, int flags)
 	return pm_fnmatch_match(pattern, string) ? 0 : 1;
 }
 
+#ifdef _WIN32
+static char *pm_regex_normalize(const char *pattern)
+{
+	size_t len = strlen(pattern);
+	char *normalized = malloc(len + 1);
+	size_t out = 0;
+	int escaped = 0;
+	int in_class = 0;
+
+	if(normalized == NULL) {
+		return NULL;
+	}
+
+	for(size_t i = 0; i < len; i++) {
+		char ch = pattern[i];
+
+		if(!escaped && ch == '[') {
+			in_class = 1;
+		} else if(!escaped && ch == ']' && in_class) {
+			in_class = 0;
+		}
+
+		if(!in_class && !escaped && (ch == '(' || ch == ')')) {
+			continue;
+		}
+
+		normalized[out++] = ch;
+		if(!escaped && ch == '\\') {
+			escaped = 1;
+		} else {
+			escaped = 0;
+		}
+	}
+
+	normalized[out] = '\0';
+	return normalized;
+}
+
+static int pm_regex_char_eq(int icase, unsigned char expected, unsigned char actual)
+{
+	if(icase) {
+		expected = (unsigned char)tolower(expected);
+		actual = (unsigned char)tolower(actual);
+	}
+	return expected == actual;
+}
+
+static const char *pm_regex_skip_token(const char *pattern)
+{
+	if(*pattern == '\\' && pattern[1] != '\0') {
+		return pattern + 2;
+	}
+	if(*pattern == '[') {
+		const char *p = pattern + 1;
+		while(*p != '\0' && *p != ']') {
+			if(p[0] == '[' && p[1] == ':') {
+				const char *end = strstr(p + 2, ":]");
+				if(end != NULL) {
+					p = end + 2;
+					continue;
+				}
+			}
+			if(*p == '\\' && p[1] != '\0') {
+				p += 2;
+			} else {
+				p++;
+			}
+		}
+		return *p == ']' ? p + 1 : p;
+	}
+	return *pattern != '\0' ? pattern + 1 : pattern;
+}
+
+static int pm_regex_token_match(const char *pattern, const char *token_end,
+		unsigned char ch, int icase)
+{
+	if(*pattern == '\\' && pattern + 1 < token_end) {
+		return pm_regex_char_eq(icase, (unsigned char)pattern[1], ch);
+	}
+	if(*pattern == '[') {
+		const char *p = pattern + 1;
+		return pm_fnmatch_bracket(&p, ch);
+	}
+	if(*pattern == '.') {
+		return ch != '\0';
+	}
+	return pm_regex_char_eq(icase, (unsigned char)*pattern, ch);
+}
+
+static int pm_regex_match_here(const char *pattern, const char *string, int icase)
+{
+	if(*pattern == '\0') {
+		return 1;
+	}
+	if(pattern[0] == '$' && pattern[1] == '\0') {
+		return *string == '\0';
+	}
+
+	const char *token_end = pm_regex_skip_token(pattern);
+	char quant = *token_end;
+
+	if(quant == '?' ) {
+		if(pm_regex_match_here(token_end + 1, string, icase)) {
+			return 1;
+		}
+		if(*string != '\0' && pm_regex_token_match(pattern, token_end,
+					(unsigned char)*string, icase)) {
+			return pm_regex_match_here(token_end + 1, string + 1, icase);
+		}
+		return 0;
+	}
+
+	if(quant == '*' || quant == '+') {
+		const char *min = string;
+		const char *max = string;
+
+		if(quant == '+') {
+			if(*min == '\0' || !pm_regex_token_match(pattern, token_end,
+						(unsigned char)*min, icase)) {
+				return 0;
+			}
+			min++;
+			max = min;
+		}
+
+		while(*max != '\0' && pm_regex_token_match(pattern, token_end,
+					(unsigned char)*max, icase)) {
+			max++;
+		}
+
+		do {
+			if(pm_regex_match_here(token_end + 1, max, icase)) {
+				return 1;
+			}
+		} while(max-- > min);
+
+		if(quant == '*' && pm_regex_match_here(token_end + 1, string, icase)) {
+			return 1;
+		}
+		return 0;
+	}
+
+	if(*string != '\0' && pm_regex_token_match(pattern, token_end,
+				(unsigned char)*string, icase)) {
+		return pm_regex_match_here(token_end, string + 1, icase);
+	}
+	return 0;
+}
+
+int pm_regcomp(pm_regex_t *preg, const char *regex, int cflags)
+{
+	if(preg == NULL || regex == NULL) {
+		errno = EINVAL;
+		return 1;
+	}
+
+	preg->pattern = pm_regex_normalize(regex);
+	if(preg->pattern == NULL) {
+		return 1;
+	}
+	preg->cflags = cflags;
+	return 0;
+}
+
+int pm_regexec(const pm_regex_t *preg, const char *string, size_t nmatch,
+		regmatch_t pmatch[], int eflags)
+{
+	int icase;
+	(void)nmatch;
+	(void)pmatch;
+	(void)eflags;
+
+	if(preg == NULL || preg->pattern == NULL || string == NULL) {
+		return REG_NOMATCH;
+	}
+
+	icase = (preg->cflags & REG_ICASE) != 0;
+	if(preg->pattern[0] == '^') {
+		return pm_regex_match_here(preg->pattern + 1, string, icase) ? 0 : REG_NOMATCH;
+	}
+
+	do {
+		if(pm_regex_match_here(preg->pattern, string, icase)) {
+			return 0;
+		}
+	} while(*string++ != '\0');
+
+	return REG_NOMATCH;
+}
+
+void pm_regfree(pm_regex_t *preg)
+{
+	if(preg != NULL) {
+		free(preg->pattern);
+		preg->pattern = NULL;
+		preg->cflags = 0;
+	}
+}
+#endif
+
 char *pm_strndup(const char *s, size_t n)
 {
 	size_t len = 0;

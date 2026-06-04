@@ -27,7 +27,6 @@
 #include <string.h>
 #include <limits.h>
 #include <dirent.h>
-#include <regex.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -349,13 +348,10 @@ static void shift_pacsave(alpm_handle_t *handle, const char *file)
 	DIR *dir = NULL;
 	struct dirent *ent;
 	struct stat st;
-	regex_t reg;
-
 	const char *basename;
 	char *dirname;
 	char oldfile[PATH_MAX];
 	char newfile[PATH_MAX];
-	char regstr[PATH_MAX];
 
 	unsigned long log_max = 0;
 	size_t basename_len;
@@ -367,11 +363,6 @@ static void shift_pacsave(alpm_handle_t *handle, const char *file)
 
 	basename = mbasename(file);
 	basename_len = strlen(basename);
-
-	snprintf(regstr, PATH_MAX, "^%s\\.pacsave\\.([[:digit:]]+)$", basename);
-	if(regcomp(&reg, regstr, REG_EXTENDED | REG_NEWLINE) != 0) {
-		goto cleanup;
-	}
 
 	dir = opendir(dirname);
 	if(dir == NULL) {
@@ -385,7 +376,9 @@ static void shift_pacsave(alpm_handle_t *handle, const char *file)
 			continue;
 		}
 
-		if(regexec(&reg, ent->d_name, 0, 0, 0) == 0) {
+		if(strncmp(ent->d_name, basename, basename_len) == 0
+				&& strncmp(ent->d_name + basename_len, ".pacsave.", 9) == 0
+				&& ent->d_name[basename_len + 9] != '\0') {
 			unsigned long cur_log;
 			cur_log = strtoul(ent->d_name + basename_len + strlen(".pacsave."), NULL, 10);
 			if(cur_log > log_max) {
@@ -415,8 +408,6 @@ static void shift_pacsave(alpm_handle_t *handle, const char *file)
 	if(stat(oldfile, &st) == 0) {
 		rename(oldfile, newfile);
 	}
-
-	regfree(&reg);
 
 cleanup:
 	free(dirname);

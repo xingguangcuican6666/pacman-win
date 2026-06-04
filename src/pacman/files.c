@@ -19,13 +19,13 @@
 
 #include <alpm.h>
 #include <alpm_list.h>
-#include <regex.h>
 
 /* pacman */
 #include "pacman.h"
 #include "util.h"
 #include "conf.h"
 #include "package.h"
+#include "regex-compat.h"
 
 static void print_line_machinereadable(alpm_db_t *db, alpm_pkg_t *pkg, char *filename)
 {
@@ -97,11 +97,11 @@ static void print_match(alpm_list_t *match, alpm_db_t *repo, alpm_pkg_t *pkg, in
 struct filetarget {
 	char *targ;
 	int exact_file;
-	regex_t reg;
+	pm_regex_t reg;
 };
 
 static void filetarget_free(struct filetarget *ftarg) {
-	regfree(&ftarg->reg);
+	pm_regfree(&ftarg->reg);
 	/* do not free ftarg->targ as it is owned by the caller of files_search */
 	free(ftarg);
 }
@@ -114,7 +114,7 @@ static int files_search(alpm_list_t *syncs, alpm_list_t *targets, int regex) {
 		char *targ = t->data;
 		size_t len = strlen(targ);
 		int exact_file = strchr(targ, '/') != NULL;
-		regex_t reg = {0};
+		pm_regex_t reg = {0};
 
 		if(exact_file) {
 			while(len > 1 && targ[0] == '/') {
@@ -124,7 +124,7 @@ static int files_search(alpm_list_t *syncs, alpm_list_t *targets, int regex) {
 		}
 
 		if(regex) {
-			if(regcomp(&reg, targ, REG_EXTENDED | REG_NOSUB | REG_ICASE | REG_NEWLINE) != 0) {
+			if(pm_regcomp(&reg, targ, REG_EXTENDED | REG_NOSUB | REG_ICASE | REG_NEWLINE) != 0) {
 				pm_printf(ALPM_LOG_ERROR,
 						_("invalid regular expression '%s'\n"), targ);
 				ret = 1;
@@ -147,7 +147,7 @@ static int files_search(alpm_list_t *syncs, alpm_list_t *targets, int regex) {
 	for(t = filetargs; t; t = alpm_list_next(t)) {
 		struct filetarget *ftarg = t->data;
 		char *targ = ftarg->targ;
-		regex_t *reg = &ftarg->reg;
+		pm_regex_t *reg = &ftarg->reg;
 		int exact_file = ftarg->exact_file;
 		alpm_list_t *s;
 		int found = 0;
@@ -167,7 +167,7 @@ static int files_search(alpm_list_t *syncs, alpm_list_t *targets, int regex) {
 					if (regex) {
 						for(size_t f = 0; f < files->count; f++) {
 							char *c = files->files[f].name;
-							if(regexec(reg, c, 0, 0, 0) == 0) {
+							if(pm_regexec(reg, c, 0, 0, 0) == 0) {
 								match = alpm_list_add(match, files->files[f].name);
 								found = 1;
 							}
@@ -183,7 +183,7 @@ static int files_search(alpm_list_t *syncs, alpm_list_t *targets, int regex) {
 						char *c = strrchr(files->files[f].name, '/');
 						if(c && *(c + 1)) {
 							if(regex) {
-								m = regexec(reg, (c + 1), 0, 0, 0);
+								m = pm_regexec(reg, (c + 1), 0, 0, 0);
 							} else {
 								m = strcmp(c + 1, targ);
 							}

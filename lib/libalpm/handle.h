@@ -22,7 +22,6 @@
 
 #include <stdio.h>
 #include <sys/types.h>
-#include <regex.h>
 #include <unistd.h>
 
 #include "alpm_list.h"

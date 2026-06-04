@@ -25,7 +25,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <regex.h>
 
 /* libalpm */
 #include "db.h"
@@ -36,6 +35,7 @@
 #include "alpm.h"
 #include "package.h"
 #include "group.h"
+#include "regex-compat.h"
 
 alpm_db_t SYMEXPORT *alpm_register_syncdb(alpm_handle_t *handle,
 		const char *treename, int siglevel)
@@ -453,7 +453,7 @@ int _alpm_db_search(alpm_db_t *db, const alpm_list_t *needles,
 
 	for(i = needles; i; i = i->next) {
 		char *targ;
-		regex_t reg;
+		pm_regex_t reg = {0};
 
 		if(i->data == NULL) {
 			continue;
@@ -462,7 +462,7 @@ int _alpm_db_search(alpm_db_t *db, const alpm_list_t *needles,
 		targ = i->data;
 		_alpm_log(db->handle, ALPM_LOG_DEBUG, "searching for target '%s'\n", targ);
 
-		if(regcomp(&reg, targ, REG_EXTENDED | REG_NOSUB | REG_ICASE | REG_NEWLINE) != 0) {
+		if(pm_regcomp(&reg, targ, REG_EXTENDED | REG_NOSUB | REG_ICASE | REG_NEWLINE) != 0) {
 			db->handle->pm_errno = ALPM_ERR_INVALID_REGEX;
 			alpm_list_free(list);
 			alpm_list_free(*ret);
@@ -476,11 +476,11 @@ int _alpm_db_search(alpm_db_t *db, const alpm_list_t *needles,
 			const char *desc = alpm_pkg_get_desc(pkg);
 
 			/* check name as regex AND as plain text */
-			if(name && (regexec(&reg, name, 0, 0, 0) == 0 || strstr(name, targ))) {
+			if(name && (pm_regexec(&reg, name, 0, 0, 0) == 0 || strstr(name, targ))) {
 				matched = name;
 			}
 			/* check desc */
-			else if(desc && regexec(&reg, desc, 0, 0, 0) == 0) {
+			else if(desc && pm_regexec(&reg, desc, 0, 0, 0) == 0) {
 				matched = desc;
 			}
 			/* TODO: should we be doing this, and should we print something
@@ -489,7 +489,7 @@ int _alpm_db_search(alpm_db_t *db, const alpm_list_t *needles,
 				/* check provides */
 				for(k = alpm_pkg_get_provides(pkg); k; k = k->next) {
 					alpm_depend_t *provide = k->data;
-					if(regexec(&reg, provide->name, 0, 0, 0) == 0) {
+					if(pm_regexec(&reg, provide->name, 0, 0, 0) == 0) {
 						matched = provide->name;
 						break;
 					}
@@ -498,7 +498,7 @@ int _alpm_db_search(alpm_db_t *db, const alpm_list_t *needles,
 			if(!matched) {
 				/* check groups */
 				for(k = alpm_pkg_get_groups(pkg); k; k = k->next) {
-					if(regexec(&reg, k->data, 0, 0, 0) == 0) {
+					if(pm_regexec(&reg, k->data, 0, 0, 0) == 0) {
 						matched = k->data;
 						break;
 					}
@@ -517,7 +517,7 @@ int _alpm_db_search(alpm_db_t *db, const alpm_list_t *needles,
 		 * next needle. This allows for AND-based package searching. */
 		alpm_list_free(list);
 		list = *ret;
-		regfree(&reg);
+		pm_regfree(&reg);
 	}
 
 	return 0;
