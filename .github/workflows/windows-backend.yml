@@ -8,7 +8,8 @@ on:
   pull_request:
 
 jobs:
-  backend-tests:
+  linux-backend-tests:
+    name: Linux Build And Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -73,6 +74,72 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-backend-build-${{ github.sha }}
+          name: linux-backend-build-${{ github.sha }}
           path: dist
+          if-no-files-found: error
+
+  windows-native-build:
+    name: Windows Native Build
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            base-devel
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-libarchive
+            mingw-w64-ucrt-x86_64-curl
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-nlohmann-json
+
+      - name: Configure
+        run: |
+          meson setup build-win \
+            -Ddoc=disabled \
+            -Ddoxygen=disabled \
+            -Di18n=false \
+            -Dgpgme=disabled \
+            -Dscriptlet-shell=/usr/bin/sh \
+            -Dldconfig=/usr/bin/true
+
+      - name: Build
+        run: meson compile -C build-win
+
+      - name: Collect Build Artifacts
+        run: |
+          rm -rf dist-win
+          mkdir -p dist-win/bin dist-win/scripts
+
+          cp build-win/pacman.exe dist-win/bin/
+          cp build-win/pacman-conf.exe dist-win/bin/
+          cp build-win/vercmp.exe dist-win/bin/
+          cp build-win/testpkg.exe dist-win/bin/
+          cp build-win/libalpm-*.dll dist-win/bin/
+
+          for dll in $(ldd build-win/pacman.exe build-win/pacman-conf.exe build-win/vercmp.exe build-win/testpkg.exe | awk '{for(i=1;i<=NF;i++) if($i ~ /^\\/ucrt64\\/bin\\/.*\\.dll$/) print $i}' | sort -u); do
+            cp "$dll" dist-win/bin/
+          done
+
+          for script in makepkg pacman-key pacman-db-upgrade repo-add repo-remove repo-elephant; do
+            cp "build-win/$script" dist-win/scripts/
+          done
+          cp -a build-win/scripts/. dist-win/scripts/
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-native-build-ucrt64-${{ github.sha }}
+          path: dist-win
           if-no-files-found: error
