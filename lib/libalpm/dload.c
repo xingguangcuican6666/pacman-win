@@ -29,10 +29,10 @@
 #include <sys/stat.h>
 #ifndef _WIN32
 #include <sys/wait.h>
+#include <pwd.h>
 #endif
 #include <signal.h>
 #include <dirent.h>
-#include <pwd.h>
 
 #ifdef HAVE_LIBCURL
 #include <curl/curl.h>
@@ -77,9 +77,11 @@ static int finalize_download_file(const char *filename)
 		unlink(filename);
                 return 1;
 	}
+#ifndef _WIN32
 	if(myuid == 0) {
 		ASSERT(chown(filename, 0, 0) != -1, return -1);
 	}
+#endif
 	ASSERT(chmod(filename, ~(_getumask()) & 0666) != -1, return -1);
 	return 0;
 }
@@ -1153,13 +1155,17 @@ static int finalize_download_locations(alpm_list_t *payloads, const char *localp
 static void prepare_resumable_downloads(alpm_handle_t *handle, alpm_list_t *payloads,
 		const char *localpath)
 {
+#ifndef _WIN32
 	struct passwd const *pw = NULL;
+#endif
 	ASSERT(handle != NULL, return);
 	ASSERT(payloads != NULL, return);
 	ASSERT(localpath != NULL, return);
+#ifndef _WIN32
 	if(_alpm_use_sandbox(handle)) {
 		ASSERT((pw = getpwnam(handle->sandboxuser)) != NULL, return);
 	}
+#endif
 	alpm_list_t *p;
 	for(p = payloads; p; p = p->next) {
 		struct dload_payload *payload = p->data;
@@ -1186,9 +1192,11 @@ static void prepare_resumable_downloads(alpm_handle_t *handle, alpm_list_t *payl
 			FREE(src);
 			continue;
 		}
+#ifndef _WIN32
 		if(pw != NULL) {
 			ASSERT(chown(payload->tempfile_name, pw->pw_uid, pw->pw_gid), return);
 		}
+#endif
 		FREE(src);
 	}
 }
