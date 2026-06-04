@@ -25,10 +25,12 @@
 #include <string.h>
 #include <limits.h>
 #include <sys/types.h>
+#ifndef _WIN32
 #include <syslog.h>
+#include <pwd.h>
+#endif
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <pwd.h>
 
 /* libalpm */
 #include "handle.h"
@@ -78,7 +80,9 @@ void _alpm_handle_free(alpm_handle_t *handle)
 	}
 	if(handle->usesyslog) {
 		handle->usesyslog = 0;
+#ifndef _WIN32
 		closelog();
+#endif
 	}
 
 #ifdef HAVE_LIBGPGME
@@ -605,12 +609,15 @@ int SYMEXPORT alpm_option_set_gpgdir(alpm_handle_t *handle, const char *gpgdir)
 
 int SYMEXPORT alpm_option_set_sandboxuser(alpm_handle_t *handle, const char *sandboxuser)
 {
+#ifndef _WIN32
 	struct passwd const *pw = NULL;
+#endif
 	CHECK_HANDLE(handle, return -1);
 	if(handle->sandboxuser) {
 		FREE(handle->sandboxuser);
 	}
 
+#ifndef _WIN32
 	if(sandboxuser != NULL) {
 		pw = getpwnam(sandboxuser);
 		if(pw == NULL) {
@@ -618,6 +625,7 @@ int SYMEXPORT alpm_option_set_sandboxuser(alpm_handle_t *handle, const char *san
 			return 1;
 		}
 	}
+#endif
 
 	STRDUP(handle->sandboxuser, sandboxuser, RET_ERR(handle, ALPM_ERR_MEMORY, -1));
 
@@ -628,7 +636,12 @@ int SYMEXPORT alpm_option_set_sandboxuser(alpm_handle_t *handle, const char *san
 int SYMEXPORT alpm_option_set_usesyslog(alpm_handle_t *handle, int usesyslog)
 {
 	CHECK_HANDLE(handle, return -1);
+#ifdef _WIN32
+	(void)usesyslog;
+	handle->usesyslog = 0;
+#else
 	handle->usesyslog = usesyslog;
+#endif
 	return 0;
 }
 

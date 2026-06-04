@@ -21,7 +21,9 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <errno.h>
+#ifndef _WIN32
 #include <syslog.h>
+#endif
 #include <time.h>
 
 /* libalpm */
@@ -77,12 +79,14 @@ int SYMEXPORT alpm_logaction(alpm_handle_t *handle, const char *prefix,
 	va_start(args, fmt);
 
 	if(handle->usesyslog) {
+#ifndef _WIN32
 		/* we can't use a va_list more than once, so we need to copy it
 		 * so we can use the original when calling vfprintf below. */
 		va_list args_syslog;
 		va_copy(args_syslog, args);
 		vsyslog(LOG_WARNING, fmt, args_syslog);
 		va_end(args_syslog);
+#endif
 	}
 
 	if(handle->logstream) {

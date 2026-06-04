@@ -70,7 +70,9 @@ static mode_t _getumask(void)
 static int finalize_download_file(const char *filename)
 {
 	struct stat st;
+#ifndef _WIN32
 	uid_t myuid = getuid();
+#endif
 	ASSERT(filename != NULL, return -1);
 	ASSERT(stat(filename, &st) == 0, return -1);
 	if(st.st_size == 0) {
@@ -98,7 +100,11 @@ static FILE *create_tempfile(struct dload_payload *payload, const char *localpat
 	MALLOC(randpath, len, RET_ERR(payload->handle, ALPM_ERR_MEMORY, NULL));
 	snprintf(randpath, len, "%salpmtmp.XXXXXX", localpath);
 	if((fd = mkstemp(randpath)) == -1 ||
+#ifdef _WIN32
+			chmod(randpath, ~(_getumask()) & 0666) ||
+#else
 			fchmod(fd, ~(_getumask()) & 0666) ||
+#endif
 			!(fp = fdopen(fd, payload->tempfile_openmode))) {
 		unlink(randpath);
 		close(fd);
@@ -343,11 +349,16 @@ static int curl_gethost(const char *url, char *buffer, size_t buf_len)
 static int utimes_long(const char *path, long seconds)
 {
 	if(seconds != -1) {
+#ifdef _WIN32
+		(void)path;
+		return 0;
+#else
 		struct timeval tv[2] = {
 			{ .tv_sec = seconds, },
 			{ .tv_sec = seconds, },
 		};
 		return utimes(path, tv);
+#endif
 	}
 	return 0;
 }
@@ -1304,7 +1315,9 @@ download_signature:
 
 	/* propagate after finalizing so .part files get copied over */
 	if(childsig != 0) {
+#ifndef _WIN32
 		kill(getpid(), childsig);
+#endif
 	}
 	if(finalize_ret != 0 && ret == 0) {
 		RET_ERR(handle, ALPM_ERR_RETRIEVE, -1);
