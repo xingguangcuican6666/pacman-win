@@ -413,8 +413,8 @@ static void curl_set_handle_opts(CURL *curl, struct dload_payload *payload)
 		payload->remote_name, payload->fileurl);
 
 	if(payload->max_size) {
-		_alpm_log(handle, ALPM_LOG_DEBUG, "%s: maxsize %jd\n",
-				payload->remote_name, (intmax_t)payload->max_size);
+		_alpm_log(handle, ALPM_LOG_DEBUG, "%s: maxsize %lld\n",
+				payload->remote_name, (long long)payload->max_size);
 		curl_easy_setopt(curl, CURLOPT_MAXFILESIZE_LARGE,
 				(curl_off_t)payload->max_size);
 	}
@@ -435,8 +435,8 @@ static void curl_set_handle_opts(CURL *curl, struct dload_payload *payload)
 		payload->tempfile_openmode = "ab";
 		curl_easy_setopt(curl, CURLOPT_RESUME_FROM_LARGE, (curl_off_t)st.st_size);
 		_alpm_log(handle, ALPM_LOG_DEBUG,
-				"%s: tempfile found, attempting continuation from %jd bytes\n",
-				payload->remote_name, (intmax_t)st.st_size);
+				"%s: tempfile found, attempting continuation from %lld bytes\n",
+				payload->remote_name, (long long)st.st_size);
 		payload->initial_size = st.st_size;
 	}
 }
@@ -471,8 +471,8 @@ static int curl_retry_next_server(CURLM *curlm, CURL *curl, struct dload_payload
 		payload->tempfile_openmode = "ab";
 		curl_easy_setopt(curl, CURLOPT_RESUME_FROM_LARGE, (curl_off_t)st.st_size);
 		_alpm_log(handle, ALPM_LOG_DEBUG,
-				"%s: tempfile found, attempting continuation from %jd bytes\n",
-				payload->remote_name, (intmax_t)st.st_size);
+				"%s: tempfile found, attempting continuation from %lld bytes\n",
+				payload->remote_name, (long long)st.st_size);
 		payload->initial_size = st.st_size;
 	} else {
 		/* we keep the file for a new retry but remove its data if any */
@@ -692,8 +692,8 @@ static int curl_check_finished_download(alpm_handle_t *handle, CURLM *curlm, CUR
 	 * as actually being transferred during curl_easy_perform() */
 	if(remote_size != -1 && bytes_dl != -1 &&
 			bytes_dl != remote_size) {
-		_alpm_log(handle, ALPM_LOG_ERROR, _("%s appears to be truncated: %jd/%jd bytes\n"),
-				payload->remote_name, (intmax_t)bytes_dl, (intmax_t)remote_size);
+		_alpm_log(handle, ALPM_LOG_ERROR, _("%s appears to be truncated: %lld/%lld bytes\n"),
+				payload->remote_name, (long long)bytes_dl, (long long)remote_size);
 		GOTO_ERR(handle, ALPM_ERR_RETRIEVE, cleanup);
 	}
 

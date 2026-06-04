@@ -352,8 +352,8 @@ static int compute_download_size(alpm_pkg_t *newpkg)
 	}
 
 finish:
-	_alpm_log(handle, ALPM_LOG_DEBUG, "setting download size %jd for pkg %s\n",
-			(intmax_t)size, newpkg->name);
+	_alpm_log(handle, ALPM_LOG_DEBUG, "setting download size %lld for pkg %s\n",
+			(long long)size, newpkg->name);
 
 	newpkg->infolevel |= INFRQ_DSIZE;
 	newpkg->download_size = size;
@@ -1138,8 +1138,8 @@ static int check_pkg_matches_db(alpm_pkg_t *spkg, alpm_pkg_t *pkgfile)
 	}
 	if(spkg->isize != pkgfile->isize) {
 		_alpm_log(handle, ALPM_LOG_DEBUG,
-				"internal package install size mismatch, expected: '%ld', actual: '%ld'\n",
-				spkg->isize, pkgfile->isize);
+				"internal package install size mismatch, expected: '%lld', actual: '%lld'\n",
+				(long long)spkg->isize, (long long)pkgfile->isize);
 		error = 1;
 	}
 

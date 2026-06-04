@@ -136,7 +136,13 @@ int _alpm_copyfile(const char *src, const char *dest)
 		goto cleanup;
 	}
 
-	if(fstat(in, &st) || fchmod(out, st.st_mode)) {
+	if(fstat(in, &st)
+#ifdef _WIN32
+			|| chmod(dest, st.st_mode)
+#else
+			|| fchmod(out, st.st_mode)
+#endif
+			) {
 		goto cleanup;
 	}
 
@@ -445,6 +451,7 @@ ssize_t _alpm_files_in_directory(alpm_handle_t *handle, const char *path,
 	return files;
 }
 
+#ifndef _WIN32
 static int should_retry(int errnum)
 {
 	return errnum == EAGAIN
@@ -566,6 +573,11 @@ void _alpm_reset_signals(void)
 		sigaction(*i, &def, NULL);
 	}
 }
+#else
+void _alpm_reset_signals(void)
+{
+}
+#endif
 
 /** Execute a command with arguments in a chroot.
  * @param handle the context handle
@@ -1460,9 +1472,11 @@ int _alpm_access(alpm_handle_t *handle, const char *dir, const char *file, int a
 	size_t len = 0;
 	int ret = 0;
 
+#ifndef _WIN32
 	int flag = 0;
 #ifdef AT_SYMLINK_NOFOLLOW
 	flag |= AT_SYMLINK_NOFOLLOW;
+#endif
 #endif
 
 	if(dir) {
@@ -1472,11 +1486,19 @@ int _alpm_access(alpm_handle_t *handle, const char *dir, const char *file, int a
 		CALLOC(check_path, len, sizeof(char), RET_ERR(handle, ALPM_ERR_MEMORY, -1));
 		snprintf(check_path, len, "%s%s", dir, file);
 
+#ifdef _WIN32
+		ret = access(check_path, amode);
+#else
 		ret = faccessat(AT_FDCWD, check_path, amode, flag);
+#endif
 		free(check_path);
 	} else {
 		dir = "";
+#ifdef _WIN32
+		ret = access(file, amode);
+#else
 		ret = faccessat(AT_FDCWD, file, amode, flag);
+#endif
 	}
 
 	if(ret != 0) {

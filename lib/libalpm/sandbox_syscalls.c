@@ -31,6 +31,7 @@
 bool _alpm_sandbox_syscalls_filter(alpm_handle_t *handle)
 {
 	int ret = 0;
+	(void)handle;
 #ifdef HAVE_LIBSECCOMP
 	/* see https://docs.docker.com/engine/security/seccomp/ for inspiration,
 	   as well as systemd's src/shared/seccomp-util.c */

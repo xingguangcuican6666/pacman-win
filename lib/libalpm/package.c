@@ -270,8 +270,8 @@ int SYMEXPORT alpm_pkg_get_sig(alpm_pkg_t *pkg, unsigned char **sig, size_t *sig
 		}
 		err = _alpm_read_file(sigpath, sig, sig_len);
 		if(err == ALPM_ERR_OK) {
-			_alpm_log(pkg->handle, ALPM_LOG_DEBUG, "found detached signature %s with size %ld\n",
-				sigpath, *sig_len);
+			_alpm_log(pkg->handle, ALPM_LOG_DEBUG, "found detached signature %s with size %llu\n",
+				sigpath, (unsigned long long)*sig_len);
 		} else {
 			GOTO_ERR(pkg->handle, err, cleanup);
 		}

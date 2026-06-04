@@ -22,16 +22,21 @@
 #include <limits.h>
 #include <locale.h> /* setlocale */
 #include <fcntl.h> /* fcntl */
+#ifndef _WIN32
 #include <glob.h>
+#include <sys/wait.h>
+#include <signal.h>
+#else
+#include <dirent.h>
+#include <process.h>
+#endif
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h> /* strdup */
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/utsname.h> /* uname */
-#include <sys/wait.h>
 #include <unistd.h>
-#include <signal.h>
 
 /* pacman */
 #include "conf.h"
@@ -42,6 +47,132 @@
 
 /* global config variable */
 config_t *config = NULL;
+
+#ifdef _WIN32
+typedef struct {
+	size_t gl_pathc;
+	char **gl_pathv;
+} glob_t;
+
+#define GLOB_NOCHECK  (1 << 0)
+#define GLOB_NOESCAPE (1 << 1)
+#define GLOB_NOSPACE  1
+#define GLOB_ABORTED  2
+#define GLOB_NOMATCH  3
+
+static int glob_append_path(glob_t *globbuf, const char *path)
+{
+	char **paths;
+	char *dup;
+
+	dup = strdup(path);
+	if(dup == NULL) {
+		return GLOB_NOSPACE;
+	}
+
+	paths = realloc(globbuf->gl_pathv, sizeof(char *) * (globbuf->gl_pathc + 1));
+	if(paths == NULL) {
+		free(dup);
+		return GLOB_NOSPACE;
+	}
+
+	globbuf->gl_pathv = paths;
+	globbuf->gl_pathv[globbuf->gl_pathc++] = dup;
+	return 0;
+}
+
+static int glob(const char *pattern, int flags,
+		int (*errfunc) (const char *epath, int eerrno), glob_t *globbuf)
+{
+	const char *base = strrchr(pattern, '/');
+	char *dirpath;
+	DIR *dir;
+	struct dirent *entry;
+	int ret = GLOB_NOMATCH;
+
+	globbuf->gl_pathc = 0;
+	globbuf->gl_pathv = NULL;
+
+	if(base != NULL) {
+		dirpath = pm_strndup(pattern, (size_t)(base - pattern));
+		base++;
+	} else {
+		dirpath = strdup(".");
+		base = pattern;
+	}
+	if(dirpath == NULL) {
+		return GLOB_NOSPACE;
+	}
+
+	dir = opendir(*dirpath ? dirpath : ".");
+	if(dir == NULL) {
+		if(errfunc && errfunc(dirpath, errno) != 0) {
+			free(dirpath);
+			return GLOB_ABORTED;
+		}
+		if(flags & GLOB_NOCHECK) {
+			ret = glob_append_path(globbuf, pattern);
+			free(dirpath);
+			return ret;
+		}
+		free(dirpath);
+		return GLOB_ABORTED;
+	}
+
+	while((entry = readdir(dir)) != NULL) {
+		char *fullpath;
+		int match;
+
+		if(strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+			continue;
+		}
+
+		match = fnmatch(base, entry->d_name, 0);
+		if(match != 0) {
+			continue;
+		}
+
+		if(strcmp(dirpath, ".") == 0) {
+			fullpath = strdup(entry->d_name);
+		} else {
+			if(pm_asprintf(&fullpath, "%s/%s", dirpath, entry->d_name) == -1) {
+				fullpath = NULL;
+			}
+		}
+		if(fullpath == NULL) {
+			ret = GLOB_NOSPACE;
+			break;
+		}
+
+		ret = glob_append_path(globbuf, fullpath);
+		free(fullpath);
+		if(ret != 0) {
+			break;
+		}
+		ret = 0;
+	}
+
+	closedir(dir);
+	free(dirpath);
+
+	if(ret == GLOB_NOMATCH && (flags & GLOB_NOCHECK)) {
+		return glob_append_path(globbuf, pattern);
+	}
+
+	return ret;
+}
+
+static void globfree(glob_t *globbuf)
+{
+	size_t i;
+	for(i = 0; i < globbuf->gl_pathc; i++) {
+		free(globbuf->gl_pathv[i]);
+	}
+	free(globbuf->gl_pathv);
+	globbuf->gl_pathc = 0;
+	globbuf->gl_pathv = NULL;
+}
+#endif
 
 #define NOCOLOR       "\033[0m"
 
@@ -230,6 +361,10 @@ static char *get_tempfile(const char *path, const char *filename)
  */
 static int systemvp(const char *file, char *const argv[])
 {
+#ifdef _WIN32
+	intptr_t ret = _spawnvp(_P_WAIT, file, (const char * const *)argv);
+	return ret == -1 ? -1 : (int)ret;
+#else
 	int pid, err = 0, ret = -1, err_fd[2];
 	sigset_t oldblock;
 	struct sigaction sa_ign = { .sa_handler = SIG_IGN }, oldint, oldquit;
@@ -296,6 +431,7 @@ static int systemvp(const char *file, char *const argv[])
 	}
 
 	return ret;
+#endif
 }
 
 /** External fetch callback */
@@ -1222,7 +1358,7 @@ nospace:
 static int process_include(const char *value, void *data,
 		const char *file, int linenum)
 {
-	glob_t globbuf;
+	glob_t globbuf = {0};
 	int globret, ret = 0;
 	size_t gindex;
 	struct section_t *section = data;

@@ -263,6 +263,19 @@ char *pm_realpath(const char *path, char *resolved_path)
 #endif
 }
 
+ssize_t pm_readlink(const char *path, char *buf, size_t bufsiz)
+{
+#ifdef _WIN32
+	(void)path;
+	(void)buf;
+	(void)bufsiz;
+	errno = ENOSYS;
+	return -1;
+#else
+	return readlink(path, buf, bufsiz);
+#endif
+}
+
 #ifdef _WIN32
 uid_t pm_getuid(void)
 {

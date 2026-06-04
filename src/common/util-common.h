@@ -32,6 +32,7 @@ int pm_fnmatch(const char *pattern, const char *string, int flags);
 char *pm_strndup(const char *s, size_t n);
 int pm_mkdir(const char *path, mode_t mode);
 char *pm_realpath(const char *path, char *resolved_path);
+ssize_t pm_readlink(const char *path, char *buf, size_t bufsiz);
 char *cwdsave(void);
 int cwdrestore(const char *path);
 
@@ -72,6 +73,23 @@ int pm_lstat(const char *path, struct stat *buf);
 #define getuid pm_getuid
 #define lstat pm_lstat
 #define realpath pm_realpath
+#define readlink pm_readlink
+
+#ifndef S_ISLNK
+#define S_ISLNK(mode) 0
+#endif
+
+#ifndef S_ISUID
+#define S_ISUID 0
+#endif
+
+#ifndef S_ISGID
+#define S_ISGID 0
+#endif
+
+#ifndef S_ISVTX
+#define S_ISVTX 0
+#endif
 #endif
 
 #endif /* PM_UTIL_COMMON_H */
