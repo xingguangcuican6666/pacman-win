@@ -30,13 +30,15 @@
 #include <time.h>
 #include <errno.h>
 #include <limits.h>
+#ifndef _WIN32
 #include <sys/wait.h>
 #include <sys/socket.h>
+#include <pwd.h>
+#endif
 #include <sys/types.h>
 #include <fcntl.h>
 #include <fnmatch.h>
 #include <poll.h>
-#include <pwd.h>
 #include <signal.h>
 
 /* libarchive */
@@ -576,6 +578,14 @@ void _alpm_reset_signals(void)
 int _alpm_run_chroot(alpm_handle_t *handle, const char *cmd, char *const argv[],
 		_alpm_cb_io stdin_cb, void *stdin_ctx)
 {
+#ifdef _WIN32
+	(void)handle;
+	(void)cmd;
+	(void)argv;
+	(void)stdin_cb;
+	(void)stdin_ctx;
+	return 1;
+#else
 	pid_t pid;
 	int child2parent_pipefd[2], parent2child_pipefd[2];
 	char *cwd = NULL;
@@ -775,6 +785,7 @@ cleanup:
 	}
 
 	return retval;
+#endif
 }
 
 /** Run ldconfig in a chroot.
@@ -783,6 +794,10 @@ cleanup:
  */
 int _alpm_ldconfig(alpm_handle_t *handle)
 {
+#ifdef _WIN32
+	(void)handle;
+	return 0;
+#else
 	char line[PATH_MAX];
 
 	_alpm_log(handle, ALPM_LOG_DEBUG, "running ldconfig\n");
@@ -799,6 +814,7 @@ int _alpm_ldconfig(alpm_handle_t *handle)
 	}
 
 	return 0;
+#endif
 }
 
 /** Helper function for comparing strings using the alpm "compare func"
@@ -925,6 +941,7 @@ char *_alpm_download_dir_setup(alpm_handle_t *handle, const char *dir)
 	char *newdir = NULL;
 	ASSERT(dir != NULL, RET_ERR(handle, ALPM_ERR_WRONG_ARGS, NULL));
 
+#ifndef _WIN32
 	if(_alpm_use_sandbox(handle)) {
 		struct passwd const *pw = NULL;
 		errno = 0;
@@ -966,9 +983,12 @@ char *_alpm_download_dir_setup(alpm_handle_t *handle, const char *dir)
 		newdir[newdirlen-2] = '/';
 		newdir[newdirlen-1] = '\0';
 	} else {
+#endif
 		/* we are not using sandbox features, download directly to the current directory */
 		STRDUP(newdir, dir, return NULL);
+#ifndef _WIN32
 	}
+#endif
 
 	return newdir;
 }

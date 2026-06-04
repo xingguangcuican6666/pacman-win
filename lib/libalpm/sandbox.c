@@ -20,11 +20,13 @@
 #include "config.h"
 
 #include <errno.h>
+#ifndef _WIN32
 #include <grp.h>
 #include <pwd.h>
 #ifdef HAVE_SYS_PRCTL_H
 #include <sys/prctl.h>
 #endif /* HAVE_SYS_PRCTL_H */
+#endif
 #include <sys/types.h>
 #include <unistd.h>
 #include <limits.h>
@@ -38,6 +40,10 @@
 
 bool _alpm_use_sandbox(alpm_handle_t *handle)
 {
+#ifdef _WIN32
+	(void)handle;
+	return false;
+#else
 	if(handle->user == 0 && 
 	   handle->sandboxuser != NULL && 
 	   (handle->disable_sandbox_filesystem == 0 || handle->disable_sandbox_syscalls == 0))
@@ -46,10 +52,18 @@ bool _alpm_use_sandbox(alpm_handle_t *handle)
 	}
 
 	return false;
+#endif
 }
 
 int SYMEXPORT alpm_sandbox_setup_child(alpm_handle_t *handle, const char* sandboxuser, const char* sandbox_path, bool restrict_syscalls)
 {
+#ifdef _WIN32
+	(void)handle;
+	(void)sandboxuser;
+	(void)sandbox_path;
+	(void)restrict_syscalls;
+	return -1;
+#else
 	struct passwd const *pw = NULL;
 
 	ASSERT(sandboxuser != NULL, return -1);
@@ -70,6 +84,7 @@ int SYMEXPORT alpm_sandbox_setup_child(alpm_handle_t *handle, const char* sandbo
 	ASSERT(setuid(pw->pw_uid) == 0, return -1);
 
 	return 0;
+#endif
 }
 
 static int should_retry(int errnum)
