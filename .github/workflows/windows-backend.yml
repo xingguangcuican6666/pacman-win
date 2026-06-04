@@ -1,6 +1,7 @@
 name: Windows Backend
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
