@@ -27,7 +27,9 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#ifndef _WIN32
 #include <sys/wait.h>
+#endif
 #include <signal.h>
 #include <dirent.h>
 #include <pwd.h>
@@ -909,6 +911,7 @@ static int curl_download_internal(alpm_handle_t *handle,
  * Returns 0 if a payload was actually downloaded
  * Returns 1 if no files were downloaded and all errors were non-fatal
  */
+#ifndef _WIN32
 static int curl_download_internal_sandboxed(alpm_handle_t *handle,
 		alpm_list_t *payloads /* struct dload_payload */,
 		const char *localpath,
@@ -1058,6 +1061,7 @@ static int curl_download_internal_sandboxed(alpm_handle_t *handle,
 	}
 	return ret;
 }
+#endif
 
 #endif
 
@@ -1205,11 +1209,15 @@ int _alpm_download(alpm_handle_t *handle,
 
 	if(handle->fetchcb == NULL) {
 #ifdef HAVE_LIBCURL
+#ifndef _WIN32
 		if(_alpm_use_sandbox(handle)) {
 			ret = curl_download_internal_sandboxed(handle, payloads, temporary_localpath, &childsig);
 		} else {
 			ret = curl_download_internal(handle, payloads);
 		}
+#else
+		ret = curl_download_internal(handle, payloads);
+#endif
 #else
 		RET_ERR(handle, ALPM_ERR_EXTERNAL_DOWNLOAD, -1);
 #endif

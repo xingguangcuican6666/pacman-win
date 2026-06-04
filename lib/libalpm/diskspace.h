@@ -20,6 +20,8 @@
 #ifndef ALPM_DISKSPACE_H
 #define ALPM_DISKSPACE_H
 
+#include "alpm.h"
+
 #ifndef _WIN32
 #if defined(HAVE_SYS_MOUNT_H)
 #include <sys/mount.h>
@@ -30,8 +32,6 @@
 #if defined(HAVE_SYS_TYPES_H)
 #include <sys/types.h>
 #endif
-
-#include "alpm.h"
 
 enum mount_used_level {
 	USED_REMOVE = 1,
