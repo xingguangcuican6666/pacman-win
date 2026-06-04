@@ -62,41 +62,6 @@
 #include "trans.h"
 #include "sandbox.h"
 
-#ifndef HAVE_STRSEP
-/** Extracts tokens from a string.
- * Replaces strset which is not portable (missing on Solaris).
- * Copyright (c) 2001 by François Gouget <fgouget_at_codeweavers.com>
- * Modifies str to point to the first character after the token if one is
- * found, or NULL if one is not.
- * @param str string containing delimited tokens to parse
- * @param delim character delimiting tokens in str
- * @return pointer to the first token in str if str is not NULL, NULL if
- * str is NULL
- */
-char *strsep(char **str, const char *delims)
-{
-	char *token;
-
-	if(*str == NULL) {
-		/* No more tokens */
-		return NULL;
-	}
-
-	token = *str;
-	while(**str != '\0') {
-		if(strchr(delims, **str) != NULL) {
-			**str = '\0';
-			(*str)++;
-			return token;
-		}
-		(*str)++;
-	}
-	/* There is no other token */
-	*str = NULL;
-	return token;
-}
-#endif
-
 int _alpm_makepath(const char *path)
 {
 	return _alpm_makepath_mode(path, 0755);
@@ -341,7 +306,8 @@ int _alpm_unpack(alpm_handle_t *handle, const char *path, const char *prefix,
 	struct archive *archive;
 	struct archive_entry *entry;
 	struct stat buf;
-	int fd, cwdfd;
+	int fd;
+	char *cwd = NULL;
 
 	fd = _alpm_open_archive(handle, path, &buf, &archive, ALPM_ERR_PKG_OPEN);
 	if(fd < 0) {
@@ -351,8 +317,8 @@ int _alpm_unpack(alpm_handle_t *handle, const char *path, const char *prefix,
 	oldmask = umask(0022);
 
 	/* save the cwd so we can restore it later */
-	OPEN(cwdfd, ".", O_RDONLY | O_CLOEXEC);
-	if(cwdfd < 0) {
+	cwd = cwdsave();
+	if(cwd == NULL) {
 		_alpm_log(handle, ALPM_LOG_ERROR, _("could not get current working directory\n"));
 	}
 
@@ -425,12 +391,12 @@ cleanup:
 	umask(oldmask);
 	_alpm_archive_read_free(archive);
 	close(fd);
-	if(cwdfd >= 0) {
-		if(fchdir(cwdfd) != 0) {
+	if(cwd != NULL) {
+		if(cwdrestore(cwd) != 0) {
 			_alpm_log(handle, ALPM_LOG_ERROR,
 					_("could not restore working directory (%s)\n"), strerror(errno));
 		}
-		close(cwdfd);
+		free(cwd);
 	}
 
 	return ret;
@@ -612,15 +578,15 @@ int _alpm_run_chroot(alpm_handle_t *handle, const char *cmd, char *const argv[],
 {
 	pid_t pid;
 	int child2parent_pipefd[2], parent2child_pipefd[2];
-	int cwdfd;
+	char *cwd = NULL;
 	int retval = 0;
 
 #define HEAD 1
 #define TAIL 0
 
 	/* save the cwd so we can restore it later */
-	OPEN(cwdfd, ".", O_RDONLY | O_CLOEXEC);
-	if(cwdfd < 0) {
+	cwd = cwdsave();
+	if(cwd == NULL) {
 		_alpm_log(handle, ALPM_LOG_ERROR, _("could not get current working directory\n"));
 	}
 
@@ -669,9 +635,7 @@ int _alpm_run_chroot(alpm_handle_t *handle, const char *cmd, char *const argv[],
 		close(parent2child_pipefd[HEAD]);
 		close(child2parent_pipefd[TAIL]);
 		close(child2parent_pipefd[HEAD]);
-		if(cwdfd >= 0) {
-			close(cwdfd);
-		}
+		free(cwd);
 
 		/* use fprintf instead of _alpm_log to send output through the parent */
 		/* don't chroot() to "/": this allows running with less caps when the
@@ -802,12 +766,12 @@ int _alpm_run_chroot(alpm_handle_t *handle, const char *cmd, char *const argv[],
 	}
 
 cleanup:
-	if(cwdfd >= 0) {
-		if(fchdir(cwdfd) != 0) {
+	if(cwd != NULL) {
+		if(cwdrestore(cwd) != 0) {
 			_alpm_log(handle, ALPM_LOG_ERROR,
 					_("could not restore working directory (%s)\n"), strerror(errno));
 		}
-		close(cwdfd);
+		free(cwd);
 	}
 
 	return retval;

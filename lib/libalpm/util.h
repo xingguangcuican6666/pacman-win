@@ -160,10 +160,6 @@ void *_alpm_realloc(void **data, size_t *current, const size_t required);
 void *_alpm_greedy_grow(void **data, size_t *current, const size_t required);
 alpm_errno_t _alpm_read_file(const char *filepath, unsigned char **data, size_t *data_len);
 
-#ifndef HAVE_STRSEP
-char *strsep(char **, const char *);
-#endif
-
 /* check exported library symbols with: nm -C -D <lib> */
 #define SYMEXPORT __attribute__((visibility("default")))
 

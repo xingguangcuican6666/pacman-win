@@ -449,7 +449,8 @@ static int commit_single_pkg(alpm_handle_t *handle, alpm_pkg_t *newpkg,
 	const char *pkgfile;
 	struct archive *archive;
 	struct archive_entry *entry;
-	int fd, cwdfd;
+	int fd;
+	char *cwd = NULL;
 	struct stat buf;
 
 	ASSERT(trans != NULL, return -1);
@@ -528,8 +529,8 @@ static int commit_single_pkg(alpm_handle_t *handle, alpm_pkg_t *newpkg,
 	}
 
 	/* save the cwd so we can restore it later */
-	OPEN(cwdfd, ".", O_RDONLY | O_CLOEXEC);
-	if(cwdfd < 0) {
+	cwd = cwdsave();
+	if(cwd == NULL) {
 		_alpm_log(handle, ALPM_LOG_ERROR, _("could not get current working directory\n"));
 	}
 
@@ -538,9 +539,7 @@ static int commit_single_pkg(alpm_handle_t *handle, alpm_pkg_t *newpkg,
 		_alpm_log(handle, ALPM_LOG_ERROR, _("could not change directory to %s (%s)\n"),
 				handle->root, strerror(errno));
 		_alpm_archive_read_free(archive);
-		if(cwdfd >= 0) {
-			close(cwdfd);
-		}
+		free(cwd);
 		close(fd);
 		return -1;
 	}
@@ -588,12 +587,12 @@ static int commit_single_pkg(alpm_handle_t *handle, alpm_pkg_t *newpkg,
 	close(fd);
 
 	/* restore the old cwd if we have it */
-	if(cwdfd >= 0) {
-		if(fchdir(cwdfd) != 0) {
+	if(cwd != NULL) {
+		if(cwdrestore(cwd) != 0) {
 			_alpm_log(handle, ALPM_LOG_ERROR,
 					_("could not restore working directory (%s)\n"), strerror(errno));
 		}
-		close(cwdfd);
+		free(cwd);
 	}
 
 	if(errors) {

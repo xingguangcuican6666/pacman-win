@@ -21,7 +21,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <locale.h> /* setlocale */
-#include <fcntl.h> /* open */
+#include <fcntl.h> /* fcntl */
 #include <glob.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -304,7 +304,7 @@ static int download_with_xfercommand(void *ctx, const char *url,
 {
 	int ret = 0, retval;
 	int usepart = 0;
-	int cwdfd = -1;
+	char *cwd = NULL;
 	struct stat st;
 	char *destfile, *tempfile, *filename;
 	const char **argv;
@@ -352,10 +352,8 @@ static int download_with_xfercommand(void *ctx, const char *url,
 	}
 
 	/* save the cwd so we can restore it later */
-	do {
-		cwdfd = open(".", O_RDONLY);
-	} while(cwdfd == -1 && errno == EINTR);
-	if(cwdfd < 0) {
+	cwd = cwdsave();
+	if(cwd == NULL) {
 		pm_printf(ALPM_LOG_ERROR, _("could not get current working directory\n"));
 	}
 
@@ -397,12 +395,12 @@ static int download_with_xfercommand(void *ctx, const char *url,
 
 cleanup:
 	/* restore the old cwd if we have it */
-	if(cwdfd >= 0) {
-		if(fchdir(cwdfd) != 0) {
+	if(cwd != NULL) {
+		if(cwdrestore(cwd) != 0) {
 			pm_printf(ALPM_LOG_ERROR, _("could not restore working directory (%s)\n"),
 					strerror(errno));
 		}
-		close(cwdfd);
+		free(cwd);
 	}
 
 	if(ret == -1) {

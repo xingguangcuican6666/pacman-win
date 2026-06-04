@@ -21,11 +21,14 @@
 #define PM_UTIL_COMMON_H
 
 #include <stdio.h>
+#include <sys/types.h> /* uid_t */
 #include <sys/stat.h> /* struct stat */
 
 char *hex_representation(const unsigned char *bytes, size_t size);
 const char *mbasename(const char *path);
 char *mdirname(const char *path);
+char *cwdsave(void);
+int cwdrestore(const char *path);
 
 int llstat(char *path, struct stat *buf);
 
@@ -36,10 +39,28 @@ char **wordsplit(const char *str);
 
 size_t strtrim(char *str);
 
-#ifndef HAVE_STRNDUP
+#if !defined(HAVE_STRNDUP) || defined(_WIN32)
 char *strndup(const char *s, size_t n);
 #endif
 
+#ifndef HAVE_STRSEP
+char *strsep(char **str, const char *delims);
+#endif
+
+#ifndef ARRAYSIZE
 #define ARRAYSIZE(a) (sizeof (a) / sizeof (a[0]))
+#endif
+
+#ifdef _WIN32
+#ifndef O_CLOEXEC
+#define O_CLOEXEC 0
+#endif
+
+uid_t pm_getuid(void);
+int pm_lstat(const char *path, struct stat *buf);
+
+#define getuid pm_getuid
+#define lstat pm_lstat
+#endif
 
 #endif /* PM_UTIL_COMMON_H */

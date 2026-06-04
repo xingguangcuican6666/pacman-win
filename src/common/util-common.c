@@ -21,6 +21,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "util-common.h"
 
@@ -101,6 +102,51 @@ char *mdirname(const char *path)
 	return strdup(".");
 }
 
+#ifdef _WIN32
+uid_t pm_getuid(void)
+{
+	return 1;
+}
+
+int pm_lstat(const char *path, struct stat *buf)
+{
+	return stat(path, buf);
+}
+#endif
+
+char *cwdsave(void)
+{
+	size_t size = 128;
+
+	for(;;) {
+		char *cwd = malloc(size);
+		if(cwd == NULL) {
+			return NULL;
+		}
+		if(getcwd(cwd, size) != NULL) {
+			return cwd;
+		}
+		free(cwd);
+		if(errno != ERANGE) {
+			return NULL;
+		}
+		if(size > ((size_t)-1) / 2) {
+			errno = ENOMEM;
+			return NULL;
+		}
+		size *= 2;
+	}
+}
+
+int cwdrestore(const char *path)
+{
+	if(path == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+	return chdir(path);
+}
+
 /** lstat wrapper that treats /path/dirsymlink/ the same as /path/dirsymlink.
  * Linux lstat follows POSIX semantics and still performs a dereference on
  * the first, and for uses of lstat in libalpm this is not what we want.
@@ -129,6 +175,37 @@ int llstat(char *path, struct stat *buf)
 
 	return ret;
 }
+
+#ifndef HAVE_STRSEP
+/** Extracts tokens from a string.
+ * Replaces strsep which is not portable.
+ * Copyright (c) 2001 by Francois Gouget <fgouget_at_codeweavers.com>
+ * @param str string containing delimited tokens to parse
+ * @param delims delimiters that terminate the current token
+ * @return pointer to the current token or NULL when no tokens remain
+ */
+char *strsep(char **str, const char *delims)
+{
+	char *token;
+
+	if(*str == NULL) {
+		return NULL;
+	}
+
+	token = *str;
+	while(**str != '\0') {
+		if(strchr(delims, **str) != NULL) {
+			**str = '\0';
+			(*str)++;
+			return token;
+		}
+		(*str)++;
+	}
+
+	*str = NULL;
+	return token;
+}
+#endif
 
 /** Wrapper around fgets() which properly handles EINTR
  * @param s string to read into
