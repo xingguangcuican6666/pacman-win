@@ -20,6 +20,7 @@
 #ifndef PM_UTIL_COMMON_H
 #define PM_UTIL_COMMON_H
 
+#include <limits.h>
 #include <stdio.h>
 #include <sys/types.h> /* uid_t */
 #include <sys/stat.h> /* struct stat */
@@ -29,6 +30,7 @@ const char *mbasename(const char *path);
 char *mdirname(const char *path);
 char *pm_strndup(const char *s, size_t n);
 int pm_mkdir(const char *path, mode_t mode);
+char *pm_realpath(const char *path, char *resolved_path);
 char *cwdsave(void);
 int cwdrestore(const char *path);
 
@@ -49,6 +51,10 @@ char *strsep(char **str, const char *delims);
 #define ARRAYSIZE(a) (sizeof (a) / sizeof (a[0]))
 #endif
 
+#ifndef NAME_MAX
+#define NAME_MAX PATH_MAX
+#endif
+
 #ifdef _WIN32
 #ifndef O_CLOEXEC
 #define O_CLOEXEC 0
@@ -59,6 +65,7 @@ int pm_lstat(const char *path, struct stat *buf);
 
 #define getuid pm_getuid
 #define lstat pm_lstat
+#define realpath pm_realpath
 #endif
 
 #endif /* PM_UTIL_COMMON_H */

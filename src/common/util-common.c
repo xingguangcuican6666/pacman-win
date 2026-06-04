@@ -131,6 +131,15 @@ int pm_mkdir(const char *path, mode_t mode)
 #endif
 }
 
+char *pm_realpath(const char *path, char *resolved_path)
+{
+#ifdef _WIN32
+	return _fullpath(resolved_path, path, resolved_path ? PATH_MAX : 0);
+#else
+	return realpath(path, resolved_path);
+#endif
+}
+
 #ifdef _WIN32
 uid_t pm_getuid(void)
 {
