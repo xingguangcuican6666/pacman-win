@@ -24,7 +24,6 @@
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/socket.h> /* setsockopt, SO_KEEPALIVE */
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -32,13 +31,6 @@
 #include <signal.h>
 #include <dirent.h>
 #include <pwd.h>
-
-#ifdef HAVE_NETINET_IN_H
-#include <netinet/in.h> /* IPPROTO_TCP */
-#endif
-#ifdef HAVE_NETINET_TCP_H
-#include <netinet/tcp.h> /* TCP_KEEPINTVL, TCP_KEEPIDLE */
-#endif
 
 #ifdef HAVE_LIBCURL
 #include <curl/curl.h>

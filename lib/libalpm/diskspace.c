@@ -50,6 +50,23 @@
 #include "trans.h"
 #include "handle.h"
 
+#ifdef _WIN32
+int _alpm_check_downloadspace(alpm_handle_t *handle, const char *cachedir,
+		size_t num_files, const off_t *file_sizes)
+{
+	(void)handle;
+	(void)cachedir;
+	(void)num_files;
+	(void)file_sizes;
+	return 0;
+}
+
+int _alpm_check_diskspace(alpm_handle_t *handle)
+{
+	(void)handle;
+	return 0;
+}
+#else
 static int mount_point_cmp(const void *p1, const void *p2)
 {
 	const alpm_mountpoint_t *mp1 = p1;
@@ -512,3 +529,4 @@ finish:
 
 	return 0;
 }
+#endif

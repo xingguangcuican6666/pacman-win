@@ -20,6 +20,7 @@
 #ifndef ALPM_DISKSPACE_H
 #define ALPM_DISKSPACE_H
 
+#ifndef _WIN32
 #if defined(HAVE_SYS_MOUNT_H)
 #include <sys/mount.h>
 #endif
@@ -55,6 +56,7 @@ typedef struct _alpm_mountpoint_t {
 	enum mount_fsinfo fsinfo_loaded;
 	FSSTATSTYPE fsp;
 } alpm_mountpoint_t;
+#endif
 
 int _alpm_check_diskspace(alpm_handle_t *handle);
 int _alpm_check_downloadspace(alpm_handle_t *handle, const char *cachedir,
