@@ -91,7 +91,7 @@ int _alpm_makepath_mode(const char *path, mode_t mode)
 		/* temporarily mask the end of the path */
 		*ptr = '\0';
 
-		if(mkdir(str, mode) < 0 && errno != EEXIST) {
+		if(pm_mkdir(str, mode) < 0 && errno != EEXIST) {
 			ret = 1;
 			goto done;
 		}
@@ -102,7 +102,7 @@ int _alpm_makepath_mode(const char *path, mode_t mode)
 
 	/* end of the string. add the full path. It will already exist when the path
 	 * passed in has a trailing slash. */
-	if(mkdir(str, mode) < 0 && errno != EEXIST) {
+	if(pm_mkdir(str, mode) < 0 && errno != EEXIST) {
 		ret = 1;
 	}
 

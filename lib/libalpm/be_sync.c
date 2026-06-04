@@ -492,8 +492,8 @@ static int sync_db_populate(alpm_db_t *db)
 				count, _alpm_pkg_cmp);
 	}
 	_alpm_log(db->handle, ALPM_LOG_DEBUG,
-			"added %zu packages to package cache for db '%s'\n",
-			count, db->treename);
+			"added %llu packages to package cache for db '%s'\n",
+			(unsigned long long)count, db->treename);
 
 cleanup:
 	_alpm_archive_read_free(archive);

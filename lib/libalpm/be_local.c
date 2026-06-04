@@ -421,7 +421,7 @@ static int local_db_add_version(alpm_db_t UNUSED *db, const char *dbpath)
 		return 1;
 	}
 
-	fprintf(dbverfile, "%zu\n", ALPM_LOCAL_DB_VERSION);
+	fprintf(dbverfile, "%u\n", (unsigned int)ALPM_LOCAL_DB_VERSION);
 	fclose(dbverfile);
 
 	return 0;
@@ -429,7 +429,7 @@ static int local_db_add_version(alpm_db_t UNUSED *db, const char *dbpath)
 
 static int local_db_create(alpm_db_t *db, const char *dbpath)
 {
-	if(mkdir(dbpath, 0755) != 0) {
+	if(pm_mkdir(dbpath, 0755) != 0) {
 		_alpm_log(db->handle, ALPM_LOG_ERROR, _("could not create directory %s: %s\n"),
 				dbpath, strerror(errno));
 		RET_ERR(db->handle, ALPM_ERR_DB_CREATE, -1);
@@ -449,7 +449,7 @@ static int local_db_validate(alpm_db_t *db)
 	char dbverpath[PATH_MAX];
 	FILE *dbverfile;
 	int t;
-	size_t version;
+	unsigned int version;
 
 	if(db->status & DB_STATUS_VALID) {
 		return 0;
@@ -505,7 +505,7 @@ static int local_db_validate(alpm_db_t *db)
 		goto version_latest;
 	}
 
-	t = fscanf(dbverfile, "%zu", &version);
+	t = fscanf(dbverfile, "%u", &version);
 	fclose(dbverfile);
 
 	if(t != 1) {
@@ -556,7 +556,7 @@ static int local_db_populate(alpm_db_t *db)
 	if(dbdir == NULL) {
 		RET_ERR(db->handle, ALPM_ERR_DB_OPEN, -1);
 	}
-	if(fstat(dirfd(dbdir), &buf) != 0) {
+	if(stat(dbpath, &buf) != 0) {
 		RET_ERR(db->handle, ALPM_ERR_DB_OPEN, -1);
 	}
 	db->status |= DB_STATUS_EXISTS;
@@ -648,8 +648,9 @@ static int local_db_populate(alpm_db_t *db)
 	if(count > 0) {
 		db->pkgcache->list = alpm_list_msort(db->pkgcache->list, count, _alpm_pkg_cmp);
 	}
-	_alpm_log(db->handle, ALPM_LOG_DEBUG, "added %zu packages to package cache for db '%s'\n",
-			count, db->treename);
+	_alpm_log(db->handle, ALPM_LOG_DEBUG,
+			"added %llu packages to package cache for db '%s'\n",
+			(unsigned long long)count, db->treename);
 
 	return 0;
 }
@@ -941,7 +942,7 @@ int _alpm_local_db_prepare(alpm_db_t *db, alpm_pkg_t *info)
 	oldmask = umask(0000);
 	pkgpath = _alpm_local_db_pkgpath(db, info, NULL);
 
-	if((retval = mkdir(pkgpath, 0755)) != 0) {
+	if((retval = pm_mkdir(pkgpath, 0755)) != 0) {
 		_alpm_log(db->handle, ALPM_LOG_ERROR, _("could not create directory %s: %s\n"),
 				pkgpath, strerror(errno));
 	}

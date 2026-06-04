@@ -27,6 +27,8 @@
 char *hex_representation(const unsigned char *bytes, size_t size);
 const char *mbasename(const char *path);
 char *mdirname(const char *path);
+char *pm_strndup(const char *s, size_t n);
+int pm_mkdir(const char *path, mode_t mode);
 char *cwdsave(void);
 int cwdrestore(const char *path);
 
@@ -38,10 +40,6 @@ void wordsplit_free(char **ws);
 char **wordsplit(const char *str);
 
 size_t strtrim(char *str);
-
-#if !defined(HAVE_STRNDUP) || defined(_WIN32)
-char *strndup(const char *s, size_t n);
-#endif
 
 #ifndef HAVE_STRSEP
 char *strsep(char **str, const char *delims);

@@ -255,7 +255,7 @@ static int files_list(alpm_list_t *syncs, alpm_list_t *targets) {
 					continue;
 				}
 
-				repo = strndup(targ, c - targ);
+				repo = pm_strndup(targ, c - targ);
 				targ = c + 1;
 			}
 

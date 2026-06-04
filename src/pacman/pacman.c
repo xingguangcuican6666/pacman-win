@@ -433,7 +433,7 @@ static int parsearg_global(int opt)
 			break;
 		case OP_CONFIG:
 			free(config->configfile);
-			config->configfile = strndup(optarg, PATH_MAX);
+			config->configfile = pm_strndup(optarg, PATH_MAX);
 			break;
 		case OP_DEBUG:
 			/* debug levels are made more 'human readable' than using a raw logmask
@@ -493,7 +493,7 @@ static int parsearg_global(int opt)
 			break;
 		case OP_LOGFILE:
 			free(config->logfile);
-			config->logfile = strndup(optarg, PATH_MAX);
+			config->logfile = pm_strndup(optarg, PATH_MAX);
 			break;
 		case OP_NOCONFIRM:
 			config->noconfirm = 1;

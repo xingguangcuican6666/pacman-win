@@ -105,13 +105,13 @@ static int sync_cleandb(const char *dbpath)
 
 		len = strlen(dname);
 		if(len > 3 && strcmp(dname + len - 3, ".db") == 0) {
-			dbname = strndup(dname, len - 3);
+			dbname = pm_strndup(dname, len - 3);
 		} else if(len > 7 && strcmp(dname + len - 7, ".db.sig") == 0) {
-			dbname = strndup(dname, len - 7);
+			dbname = pm_strndup(dname, len - 7);
 		} else if(len > 6 && strcmp(dname + len - 6, ".files") == 0) {
-			dbname = strndup(dname, len - 6);
+			dbname = pm_strndup(dname, len - 6);
 		} else if(len > 10 && strcmp(dname + len - 10, ".files.sig") == 0) {
-			dbname = strndup(dname, len - 10);
+			dbname = pm_strndup(dname, len - 10);
 		} else {
 			ret += unlink_verbose(path, 0);
 			continue;

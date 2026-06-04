@@ -102,6 +102,35 @@ char *mdirname(const char *path)
 	return strdup(".");
 }
 
+char *pm_strndup(const char *s, size_t n)
+{
+	size_t len = 0;
+	char *new;
+
+	while(len < n && s[len] != '\0') {
+		len++;
+	}
+
+	new = malloc(len + 1);
+
+	if(new == NULL) {
+		return NULL;
+	}
+
+	new[len] = '\0';
+	return memcpy(new, s, len);
+}
+
+int pm_mkdir(const char *path, mode_t mode)
+{
+#ifdef _WIN32
+	(void)mode;
+	return mkdir(path);
+#else
+	return mkdir(path, mode);
+#endif
+}
+
 #ifdef _WIN32
 uid_t pm_getuid(void)
 {
@@ -280,27 +309,6 @@ static size_t strnlen(const char *s, size_t max)
 }
 #endif
 
-#ifndef HAVE_STRNDUP
-/** Copies a string.
- * Returned string needs to be freed
- * @param s string to be copied
- * @param n maximum number of characters to copy
- * @return pointer to the new string on success, NULL on error
- */
-char *strndup(const char *s, size_t n)
-{
-	size_t len = strnlen(s, n);
-	char *new = (char *) malloc(len + 1);
-
-	if(new == NULL) {
-		return NULL;
-	}
-
-	new[len] = '\0';
-	return (char *)memcpy(new, s, len);
-}
-#endif
-
 void wordsplit_free(char **ws)
 {
 	if(ws) {
@@ -358,7 +366,7 @@ char **wordsplit(const char *str)
 
 		if(wordlen == (size_t) (end - c)) {
 			/* no internal quotes or escapes, copy it the easy way */
-			if((out[count++] = strndup(c, wordlen)) == NULL) {
+			if((out[count++] = pm_strndup(c, wordlen)) == NULL) {
 				goto error;
 			}
 		} else {
