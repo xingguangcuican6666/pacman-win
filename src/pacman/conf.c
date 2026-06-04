@@ -35,7 +35,9 @@
 #include <string.h> /* strdup */
 #include <sys/stat.h>
 #include <sys/types.h>
+#ifndef _WIN32
 #include <sys/utsname.h> /* uname */
+#endif
 #include <unistd.h>
 
 /* pacman */
@@ -554,10 +556,14 @@ cleanup:
 int config_add_architecture(char *arch)
 {
 	if(strcmp(arch, "auto") == 0) {
-		struct utsname un;
 		char *newarch;
+#ifdef _WIN32
+		newarch = strdup("x86_64");
+#else
+		struct utsname un;
 		uname(&un);
 		newarch = strdup(un.machine);
+#endif
 		free(arch);
 		arch = newarch;
 	}

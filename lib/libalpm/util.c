@@ -1026,7 +1026,7 @@ void _alpm_remove_temporary_download_dir(const char *dir)
 				/* file path is too long to remove, hmm. */
 				continue;
 			} else {
-				sprintf(name, "%s/%s", dir, dp->d_name);
+				snprintf(name, PATH_MAX, "%s/%s", dir, dp->d_name);
 				if(unlink(name)) {
 					continue;
 				}
