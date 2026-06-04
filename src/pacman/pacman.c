@@ -32,7 +32,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
+#ifndef _WIN32
 #include <sys/utsname.h> /* uname */
+#endif
 #include <locale.h> /* setlocale */
 #include <errno.h>
 
@@ -277,12 +279,17 @@ static void localize(void)
 static void setuseragent(void)
 {
 	char agent[100];
-	struct utsname un;
 	int len;
 
+#ifdef _WIN32
+	len = snprintf(agent, 100, "pacman/%s (Windows x86_64) libalpm/%s",
+			PACKAGE_VERSION, alpm_version());
+#else
+	struct utsname un;
 	uname(&un);
 	len = snprintf(agent, 100, "pacman/%s (%s %s) libalpm/%s",
 			PACKAGE_VERSION, un.sysname, un.machine, alpm_version());
+#endif
 	if(len >= 100) {
 		pm_printf(ALPM_LOG_WARNING, _("HTTP_USER_AGENT truncated\n"));
 	}

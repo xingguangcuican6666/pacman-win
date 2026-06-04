@@ -125,7 +125,11 @@ static void make_aligned_titles(void)
 
 	for(i = 0; i < ARRAYSIZE(wbuf); i++) {
 		wlen[i] = mbstowcs(wbuf[i], buf[i], strlen(buf[i]) + 1);
+#ifdef _WIN32
+		wcol[i] = (int)wlen[i];
+#else
 		wcol[i] = wcswidth(wbuf[i], wlen[i]);
+#endif
 		if(wcol[i] > maxcol) {
 			maxcol = wcol[i];
 		}
