@@ -1,0 +1,6 @@
+#!@BASH@
+
+set -eu
+
+cd "@BUILDDIR@"
+exec "@REAL_PROGPATH@" "$@"

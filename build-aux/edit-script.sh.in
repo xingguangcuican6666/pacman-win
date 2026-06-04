@@ -1,0 +1,58 @@
+#!@BASH@
+
+set -eu
+
+if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
+	echo "usage: $0 INPUT OUTPUT [MODE]" >&2
+	exit 1
+fi
+
+input=$1
+output=$2
+mode=${3:-}
+
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+
+cat >"$tmp" <<'EOF'
+CARCH=@CARCH@
+CHOST=@CHOST@
+PKGEXT=@PKGEXT@
+SRCEXT=@SRCEXT@
+ROOTDIR=@ROOTDIR@
+LOCALEDIR=@LOCALEDIR@
+sysconfdir=@sysconfdir@
+localstatedir=@localstatedir@
+PKGDATADIR=@PKGDATADIR@
+KEYRINGDIR=@KEYRINGDIR@
+PREFIX=@PREFIX@
+BASH=@BASH@
+PACKAGE_VERSION=@PACKAGE_VERSION@
+PACKAGE_NAME=@PACKAGE_NAME@
+BUILDSCRIPT=@BUILDSCRIPT@
+TEMPLATE_DIR=@TEMPLATE_DIR@
+DEBUGSUFFIX=@DEBUGSUFFIX@
+INODECMD=@INODECMD@
+FILECMD=@FILECMD@
+LIBMAKEPKGDIR=@LIBMAKEPKGDIR@
+STRIP_BINARIES=@STRIP_BINARIES@
+STRIP_SHARED=@STRIP_SHARED@
+STRIP_STATIC=@STRIP_STATIC@
+BSDTAR_NO_READ_SPARSE=@BSDTAR_NO_READ_SPARSE@
+EOF
+
+python3 - "$input" "$output" "$tmp" <<'PY'
+from pathlib import Path
+import sys
+
+input_path, output_path, subst_path = sys.argv[1:4]
+data = Path(input_path).read_text()
+for line in Path(subst_path).read_text().splitlines():
+    key, value = line.split("=", 1)
+    data = data.replace(f"@{key}@", value)
+Path(output_path).write_text(data)
+PY
+
+if [ -n "$mode" ]; then
+	chmod "$mode" "$output"
+fi

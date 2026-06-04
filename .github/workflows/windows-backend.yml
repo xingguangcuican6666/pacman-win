@@ -20,7 +20,8 @@ jobs:
           sudo apt-get install -y \
             meson ninja-build pkg-config gettext \
             libarchive-dev libcurl4-openssl-dev libgpgme-dev \
-            libssl-dev libseccomp-dev bash fakeroot fakechroot
+            libssl-dev libseccomp-dev bash fakeroot fakechroot \
+            nlohmann-json3-dev
 
       - name: Configure
         run: meson setup build
