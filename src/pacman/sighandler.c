@@ -40,9 +40,13 @@ static ssize_t xwrite(int fd, const void *buf, size_t count)
 
 static void _reset_handler(int signum)
 {
+#ifdef _WIN32
+	signal(signum, SIG_DFL);
+#else
 	struct sigaction new_action = { .sa_handler = SIG_DFL };
 	sigemptyset(&new_action.sa_mask);
 	sigaction(signum, &new_action, NULL);
+#endif
 }
 
 /** Catches thrown signals. Performs necessary cleanup to ensure database is
@@ -75,6 +79,12 @@ static void soft_interrupt_handler(int signum)
 
 void install_soft_interrupt_handler(void)
 {
+#ifdef _WIN32
+	signal(SIGINT, soft_interrupt_handler);
+#ifdef SIGHUP
+	signal(SIGHUP, soft_interrupt_handler);
+#endif
+#else
 	struct sigaction new_action = {
 		.sa_handler = soft_interrupt_handler,
 		.sa_flags = SA_RESTART,
@@ -86,16 +96,30 @@ void install_soft_interrupt_handler(void)
 
 	sigaction(SIGINT, &new_action, NULL);
 	sigaction(SIGHUP, &new_action, NULL);
+#endif
 }
 
 void remove_soft_interrupt_handler(void)
 {
 	_reset_handler(SIGINT);
+#ifdef SIGHUP
 	_reset_handler(SIGHUP);
+#endif
 }
 
 static void segv_handler(int signum)
 {
+#ifdef _WIN32
+	const char msg[] = "\nerror: segmentation fault\n"
+		"Please submit a full bug report with --debug if appropriate.\n";
+	console_cursor_move_end();
+	xwrite(STDERR_FILENO, msg, sizeof(msg) - 1);
+	xwrite(STDOUT_FILENO, CURSOR_SHOW_ANSICODE,
+		sizeof(CURSOR_SHOW_ANSICODE) - 1);
+	_reset_handler(signum);
+	raise(signum);
+	_Exit(signum);
+#else
 	sigset_t segvset;
 	const char msg[] = "\nerror: segmentation fault\n"
 		"Please submit a full bug report with --debug if appropriate.\n";
@@ -115,10 +139,14 @@ static void segv_handler(int signum)
 
 	/* raise should immediately abort, but just to make absolutely sure */
 	_Exit(signum);
+#endif
 }
 
 void install_segv_handler(void)
 {
+#ifdef _WIN32
+	signal(SIGSEGV, segv_handler);
+#else
 	struct sigaction new_action = {
 		.sa_handler = segv_handler,
 		.sa_flags = SA_RESTART,
@@ -126,6 +154,7 @@ void install_segv_handler(void)
 
 	sigfillset(&new_action.sa_mask);
 	sigaction(SIGSEGV, &new_action, NULL);
+#endif
 }
 
 static void winch_handler(int signum)
@@ -136,6 +165,9 @@ static void winch_handler(int signum)
 
 void install_winch_handler(void)
 {
+#ifdef _WIN32
+	columns_cache_reset();
+#else
 	struct sigaction new_action = {
 		.sa_handler = winch_handler,
 		.sa_flags = SA_RESTART,
@@ -143,4 +175,5 @@ void install_winch_handler(void)
 
 	sigemptyset(&new_action.sa_mask);
 	sigaction(SIGWINCH, &new_action, NULL);
+#endif
 }

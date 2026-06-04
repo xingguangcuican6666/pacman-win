@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <wctype.h>
 
 #include "util-common.h"
 
@@ -473,6 +474,110 @@ ssize_t pm_readlink(const char *path, char *buf, size_t bufsiz)
 	return -1;
 #else
 	return readlink(path, buf, bufsiz);
+#endif
+}
+
+int pm_setenv(const char *name, const char *value, int overwrite)
+{
+#ifdef _WIN32
+	if(!overwrite && getenv(name) != NULL) {
+		return 0;
+	}
+	return _putenv_s(name, value != NULL ? value : "");
+#else
+	return setenv(name, value, overwrite);
+#endif
+}
+
+ssize_t pm_getline(char **lineptr, size_t *n, FILE *stream)
+{
+#ifdef _WIN32
+	size_t len = 0;
+	int ch;
+	char *buf;
+
+	if(lineptr == NULL || n == NULL || stream == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if(*lineptr == NULL || *n == 0) {
+		*n = 128;
+		*lineptr = malloc(*n);
+		if(*lineptr == NULL) {
+			return -1;
+		}
+	}
+
+	buf = *lineptr;
+	while((ch = fgetc(stream)) != EOF) {
+		if(len + 1 >= *n) {
+			size_t new_size = *n * 2;
+			char *new_buf = realloc(buf, new_size);
+			if(new_buf == NULL) {
+				return -1;
+			}
+			buf = new_buf;
+			*lineptr = new_buf;
+			*n = new_size;
+		}
+		buf[len++] = (char)ch;
+		if(ch == '\n') {
+			break;
+		}
+	}
+
+	if(len == 0 && ch == EOF) {
+		return -1;
+	}
+
+	buf[len] = '\0';
+	return (ssize_t)len;
+#else
+	return getline(lineptr, n, stream);
+#endif
+}
+
+char *pm_ctermid(char *s)
+{
+#ifdef _WIN32
+	static char termid_buf[] = "CONIN$";
+	if(s != NULL) {
+		strcpy(s, termid_buf);
+		return s;
+	}
+	return termid_buf;
+#else
+	return ctermid(s);
+#endif
+}
+
+int pm_wcwidth(wchar_t wc)
+{
+#ifdef _WIN32
+	if(wc == L'\0') {
+		return 0;
+	}
+	if(iswcntrl(wc)) {
+		return 0;
+	}
+	return 1;
+#else
+	return wcwidth(wc);
+#endif
+}
+
+int pm_wcswidth(const wchar_t *wcs, size_t n)
+{
+#ifdef _WIN32
+	int width = 0;
+	size_t i;
+	for(i = 0; i < n && wcs[i] != L'\0'; i++) {
+		width += pm_wcwidth(wcs[i]);
+	}
+	return width;
+#else
+	return wcswidth(wcs, n);
 #endif
 }
 

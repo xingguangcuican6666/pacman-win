@@ -518,9 +518,9 @@ void cb_question(void *ctx, alpm_question_t *question)
 				alpm_question_select_provider_t *q = &question->select_provider;
 				size_t count = alpm_list_count(q->providers);
 				char *depstring = alpm_dep_compute_string(q->depend);
-				colon_printf(_n("There is %zu provider available for %s\n",
-						"There are %zu providers available for %s:\n", count),
-						count, depstring);
+				colon_printf(_n("There is %llu provider available for %s\n",
+						"There are %llu providers available for %s:\n", count),
+						(unsigned long long)count, depstring);
 				free(depstring);
 				select_display(q->providers);
 				q->use_index = select_question(count);

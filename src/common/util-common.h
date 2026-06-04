@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <sys/types.h> /* uid_t */
 #include <sys/stat.h> /* struct stat */
+#include <wchar.h>
 
 #include "regex-compat.h"
 
@@ -35,6 +36,11 @@ char *pm_strndup(const char *s, size_t n);
 int pm_mkdir(const char *path, mode_t mode);
 char *pm_realpath(const char *path, char *resolved_path);
 ssize_t pm_readlink(const char *path, char *buf, size_t bufsiz);
+int pm_setenv(const char *name, const char *value, int overwrite);
+ssize_t pm_getline(char **lineptr, size_t *n, FILE *stream);
+char *pm_ctermid(char *s);
+int pm_wcwidth(wchar_t wc);
+int pm_wcswidth(const wchar_t *wcs, size_t n);
 char *cwdsave(void);
 int cwdrestore(const char *path);
 
@@ -72,10 +78,15 @@ uid_t pm_getuid(void);
 int pm_lstat(const char *path, struct stat *buf);
 
 #define fnmatch pm_fnmatch
+#define getline pm_getline
+#define ctermid pm_ctermid
+#define setenv pm_setenv
 #define getuid pm_getuid
 #define lstat pm_lstat
 #define realpath pm_realpath
 #define readlink pm_readlink
+#define wcwidth pm_wcwidth
+#define wcswidth pm_wcswidth
 
 #ifndef S_ISLNK
 #define S_ISLNK(mode) 0
