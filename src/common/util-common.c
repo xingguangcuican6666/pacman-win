@@ -102,6 +102,129 @@ char *mdirname(const char *path)
 	return strdup(".");
 }
 
+static int pm_fnmatch_charclass(const char *name, unsigned char ch)
+{
+	if(strcmp(name, "alnum") == 0) {
+		return isalnum(ch) != 0;
+	} else if(strcmp(name, "alpha") == 0) {
+		return isalpha(ch) != 0;
+	} else if(strcmp(name, "digit") == 0) {
+		return isdigit(ch) != 0;
+	} else if(strcmp(name, "lower") == 0) {
+		return islower(ch) != 0;
+	} else if(strcmp(name, "upper") == 0) {
+		return isupper(ch) != 0;
+	} else if(strcmp(name, "space") == 0) {
+		return isspace(ch) != 0;
+	}
+	return 0;
+}
+
+static int pm_fnmatch_bracket(const char **pattern, unsigned char ch)
+{
+	const char *p = *pattern;
+	int negate = 0;
+	int matched = 0;
+
+	if(*p == '!' || *p == '^') {
+		negate = 1;
+		p++;
+	}
+
+	while(*p != '\0' && *p != ']') {
+		if(p[0] == '[' && p[1] == ':') {
+			const char *end = strstr(p + 2, ":]");
+			if(end != NULL) {
+				size_t len = (size_t)(end - (p + 2));
+				char cls[16];
+				if(len < sizeof(cls)) {
+					memcpy(cls, p + 2, len);
+					cls[len] = '\0';
+					if(pm_fnmatch_charclass(cls, ch)) {
+						matched = 1;
+					}
+					p = end + 2;
+					continue;
+				}
+			}
+		}
+
+		if(p[1] == '-' && p[2] != '\0' && p[2] != ']') {
+			unsigned char start = (unsigned char)p[0];
+			unsigned char end = (unsigned char)p[2];
+			if(start <= ch && ch <= end) {
+				matched = 1;
+			}
+			p += 3;
+			continue;
+		}
+
+		if((unsigned char)p[0] == ch) {
+			matched = 1;
+		}
+		p++;
+	}
+
+	if(*p == ']') {
+		*pattern = p + 1;
+	} else {
+		*pattern = p;
+	}
+
+	return negate ? !matched : matched;
+}
+
+static int pm_fnmatch_match(const char *pattern, const char *string)
+{
+	while(*pattern != '\0') {
+		switch(*pattern) {
+		case '*':
+			while(*pattern == '*') {
+				pattern++;
+			}
+			if(*pattern == '\0') {
+				return 1;
+			}
+			while(*string != '\0') {
+				if(pm_fnmatch_match(pattern, string)) {
+					return 1;
+				}
+				string++;
+			}
+			return pm_fnmatch_match(pattern, string);
+		case '?':
+			if(*string == '\0') {
+				return 0;
+			}
+			pattern++;
+			string++;
+			break;
+		case '[':
+			pattern++;
+			if(*string == '\0' || !pm_fnmatch_bracket(&pattern, (unsigned char)*string)) {
+				return 0;
+			}
+			string++;
+			break;
+		default:
+			if(*pattern != *string) {
+				return 0;
+			}
+			pattern++;
+			string++;
+			break;
+		}
+	}
+
+	return *string == '\0';
+}
+
+int pm_fnmatch(const char *pattern, const char *string, int flags)
+{
+	(void)flags;
+	return pm_fnmatch_match(pattern, string) ? 0 : 1;
+}
+
 char *pm_strndup(const char *s, size_t n)
 {
 	size_t len = 0;

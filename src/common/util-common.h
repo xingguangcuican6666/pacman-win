@@ -28,6 +28,7 @@
 char *hex_representation(const unsigned char *bytes, size_t size);
 const char *mbasename(const char *path);
 char *mdirname(const char *path);
+int pm_fnmatch(const char *pattern, const char *string, int flags);
 char *pm_strndup(const char *s, size_t n);
 int pm_mkdir(const char *path, mode_t mode);
 char *pm_realpath(const char *path, char *resolved_path);
@@ -60,9 +61,14 @@ char *strsep(char **str, const char *delims);
 #define O_CLOEXEC 0
 #endif
 
+#ifndef FNM_NOMATCH
+#define FNM_NOMATCH 1
+#endif
+
 uid_t pm_getuid(void);
 int pm_lstat(const char *path, struct stat *buf);
 
+#define fnmatch pm_fnmatch
 #define getuid pm_getuid
 #define lstat pm_lstat
 #define realpath pm_realpath

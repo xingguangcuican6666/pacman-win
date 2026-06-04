@@ -26,7 +26,9 @@
 #include <errno.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#ifndef _WIN32
 #include <fnmatch.h>
+#endif
 
 #include <alpm.h>
 #include <alpm_list.h>

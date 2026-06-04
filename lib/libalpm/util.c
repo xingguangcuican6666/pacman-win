@@ -34,10 +34,10 @@
 #include <sys/wait.h>
 #include <sys/socket.h>
 #include <pwd.h>
+#include <fnmatch.h>
 #endif
 #include <sys/types.h>
 #include <fcntl.h>
-#include <fnmatch.h>
 #include <poll.h>
 #include <signal.h>
 
