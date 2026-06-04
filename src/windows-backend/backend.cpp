@@ -1,5 +1,6 @@
 #include "backend.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -227,6 +228,28 @@ static std::vector<PathChange> diff_snapshot(
 	return changes;
 }
 
+static std::map<std::string, FileSnapshot> snapshot_declared_paths(
+	const std::filesystem::path& root,
+	const std::vector<OwnedPath>& paths)
+{
+	std::map<std::string, FileSnapshot> snapshot;
+	for(const auto& owned_path : paths) {
+		auto abs_path = rooted_destination(root, owned_path.path);
+		auto rel_path = relative_path_string(root, abs_path);
+		snapshot[rel_path] = snapshot_path(abs_path);
+	}
+	return snapshot;
+}
+
+static std::vector<OwnedPath> manifest_owned_paths(const pacman::windows::PackageManifest& manifest)
+{
+	std::vector<OwnedPath> paths;
+	for(const auto& entry : manifest.files) {
+		paths.push_back({entry.destination, entry.directory});
+	}
+	return paths;
+}
+
 static std::vector<OwnedRegistryValue> snapshot_registry_values(const std::vector<RegistryEntry>& manifest_registry)
 {
 	std::vector<OwnedRegistryValue> values;
@@ -353,6 +376,54 @@ static void set_path_changes(InstallerTrace& trace, const std::vector<PathChange
 	}
 }
 
+static void ensure_trace_roots_from_paths(InstallerTrace& trace)
+{
+	if(!trace.trace_roots.empty()) {
+		return;
+	}
+
+	std::set<std::string> seen;
+	for(const auto& path : trace.paths) {
+		if(seen.insert(path.path).second) {
+			trace.trace_roots.push_back(path.path);
+		}
+	}
+}
+
+static std::vector<PathChange> tracked_path_changes_for_cleanup(const InstalledPackage& package)
+{
+	if(!package.trace.path_changes.empty()) {
+		return package.trace.path_changes;
+	}
+
+	std::vector<PathChange> changes;
+	std::vector<OwnedPath> paths = package.trace.paths;
+	if(paths.empty()) {
+		paths = manifest_owned_paths(package.manifest);
+	}
+	for(const auto& path : paths) {
+		PathChange change;
+		change.path = path.path;
+		change.change_type = TraceChangeType::Created;
+		change.after.exists = true;
+		change.after.directory = path.directory;
+		changes.push_back(std::move(change));
+	}
+	return changes;
+}
+
+static std::vector<PathChange> sorted_cleanup_changes(const InstalledPackage& package)
+{
+	auto changes = tracked_path_changes_for_cleanup(package);
+	std::sort(changes.begin(), changes.end(), [](const PathChange& left, const PathChange& right) {
+		if(left.after.directory != right.after.directory) {
+			return !left.after.directory && right.after.directory;
+		}
+		return left.path.size() > right.path.size();
+	});
+	return changes;
+}
+
 static int execute_command(
 	const std::string& phase,
 	const std::string& executable,
@@ -368,9 +439,9 @@ static int execute_command(
 	if(!working_directory.empty()) {
 		command = "cd " + shell_quote(working_directory) + " && ";
 	}
-	command += "\"" + executable + "\"";
+	command += shell_quote(executable);
 	for(const auto& arg : arguments) {
-		command += " \"" + arg + "\"";
+		command += " " + shell_quote(arg);
 	}
 	int exit_code = std::system(command.c_str());
 	execution.exit_code = exit_code;
@@ -463,18 +534,14 @@ static bool cleanup_tracked_path(const std::filesystem::path& root, const PathCh
 		return true;
 	}
 	if(change.after.directory) {
-		std::filesystem::remove_all(path, ec);
+		if(change.change_type != TraceChangeType::Created) {
+			return true;
+		}
+		std::filesystem::remove(path, ec);
 		return !ec;
 	}
 	std::filesystem::remove(path, ec);
 	return !ec;
-}
-
-static bool registry_state_exists(const std::filesystem::path& root, const std::string& package_name)
-{
-	std::error_code ec;
-	auto registry_path = root / "var" / "lib" / "pacman" / "windows-registry" / (package_name + ".json");
-	return std::filesystem::is_regular_file(registry_path, ec);
 }
 
 static bool registry_state_contains_tracked_values(
@@ -511,6 +578,139 @@ static bool registry_state_contains_tracked_values(
 		}
 	}
 	return false;
+}
+
+static bool write_registry_state(LocalDatabase& db, const InstalledPackage& package, std::string& error)
+{
+	auto regdir = db.root() / "var" / "lib" / "pacman" / "windows-registry";
+	auto regpath = regdir / (package.manifest.name + ".json");
+	std::error_code ec;
+
+	if(package.trace.registry_values.empty()) {
+		std::filesystem::remove(regpath, ec);
+		if(ec) {
+			error = "failed to remove windows registry state file";
+			return false;
+		}
+		return true;
+	}
+
+	nlohmann::json registry = nlohmann::json::array();
+	for(const auto& value : package.trace.registry_values) {
+		registry.push_back({
+			{"hive", value.hive},
+			{"key", value.key},
+			{"name", value.name},
+			{"type", value.type},
+			{"value", value.value}
+		});
+	}
+
+	std::filesystem::create_directories(regdir, ec);
+	if(ec) {
+		error = "failed to create windows registry state directory";
+		return false;
+	}
+
+	std::ofstream regfile(regpath);
+	if(!regfile) {
+		error = "failed to write windows registry state file";
+		return false;
+	}
+	regfile << registry.dump(2);
+	return true;
+}
+
+static bool remove_installed_package(LocalDatabase& db, const InstalledPackage& installed_view, std::string& error)
+{
+	InstalledPackage installed = installed_view;
+	auto persist_failure = [&](const std::string& status, const std::string& message) {
+		installed.uninstall_status = status;
+		installed.last_error = message;
+		std::vector<std::string> save_errors;
+		if(!db.save_package(installed, save_errors) && !save_errors.empty()) {
+			error = save_errors.front();
+		} else {
+			error = message;
+		}
+		return false;
+	};
+
+	if(installed.has_explicit_uninstall && !installed.uninstall.command.empty()) {
+		CommandExecution execution;
+		std::string working_directory;
+		if(!installed.uninstall.working_directory.empty()) {
+			working_directory = rooted_destination(db.root(), installed.uninstall.working_directory).string();
+		}
+		int exit_code = execute_command(
+			"uninstall",
+			installed.uninstall.command,
+			installed.uninstall.arguments,
+			working_directory,
+			execution);
+		installed.trace.command_results.push_back(execution);
+		if(exit_code != 0) {
+			return persist_failure("command-failed", "explicit uninstall command failed");
+		}
+	}
+
+	auto cleanup_changes = sorted_cleanup_changes(installed);
+	if(installed.trace.paths.empty()) {
+		add_trace_paths(installed.trace, manifest_owned_paths(installed.manifest));
+	}
+	if(installed.trace.trace_roots.empty()) {
+		ensure_trace_roots_from_paths(installed.trace);
+	}
+
+	auto before_cleanup = snapshot_tree(db.root(), installed.trace.trace_roots);
+	bool cleanup_failed = false;
+	for(const auto& change : cleanup_changes) {
+		if(!cleanup_tracked_path(db.root(), change)) {
+			cleanup_failed = true;
+		}
+	}
+	for(const auto& shortcut : installed.trace.shortcuts) {
+		std::error_code ec;
+		std::filesystem::remove(rooted_destination(db.root(), shortcut), ec);
+		if(ec) {
+			cleanup_failed = true;
+		}
+	}
+	auto after_cleanup = snapshot_tree(db.root(), installed.trace.trace_roots);
+	auto residual_changes = diff_snapshot(before_cleanup, after_cleanup);
+	std::vector<PathChange> residual_present;
+	for(const auto& change : residual_changes) {
+		if(change.after.exists) {
+			residual_present.push_back(change);
+		}
+	}
+	if(cleanup_failed || !residual_present.empty()) {
+		return persist_failure(
+			cleanup_failed ? "cleanup-failed" : "residuals-remain",
+			cleanup_failed
+				? "failed to clean tracked filesystem paths"
+				: "tracked filesystem residuals remain after uninstall");
+	}
+
+	auto registry_state_path = db.root() / "var" / "lib" / "pacman" / "windows-registry" / (installed.manifest.name + ".json");
+	if(!installed.trace.registry_values.empty()
+			&& registry_state_contains_tracked_values(db.root(), installed.manifest.name, installed.trace.registry_values)) {
+		return persist_failure("registry-residuals-remain", "tracked registry residuals remain after uninstall");
+	}
+
+	std::error_code ec;
+	std::filesystem::remove(registry_state_path, ec);
+	if(ec) {
+		return persist_failure("registry-cleanup-failed", "failed to remove registry state file");
+	}
+
+	std::vector<std::string> remove_errors;
+	if(!db.remove_package(installed.manifest.name, remove_errors)) {
+		error = remove_errors.empty() ? "failed to remove package state" : remove_errors.front();
+		return false;
+	}
+
+	return true;
 }
 
 int pm_windows_backend_enabled(void)
@@ -563,6 +763,13 @@ int pm_windows_query_should_handle(int info, int list_mode)
 
 static pm_winpkg_result_t *install_extracted(LocalDatabase& db, const ExtractedPackage& extracted, int flags)
 {
+	if(const InstalledPackage *existing = db.find_installed(extracted.manifest.name)) {
+		std::string remove_error;
+		if(!remove_installed_package(db, *existing, remove_error)) {
+			return result_with_error(remove_error.c_str());
+		}
+	}
+
 	InstalledPackage installed;
 	installed.manifest = extracted.manifest;
 	installed.reason = (flags & ALPM_TRANS_FLAG_ALLDEPS) ? InstallReason::Dependency : InstallReason::Explicit;
@@ -580,6 +787,8 @@ static pm_winpkg_result_t *install_extracted(LocalDatabase& db, const ExtractedP
 	}
 
 	if(extracted.manifest.source_type == PackageSourceType::Payload) {
+		installed.trace.paths = manifest_owned_paths(extracted.manifest);
+		auto before_paths = snapshot_declared_paths(db.root(), installed.trace.paths);
 		for(const auto& entry : extracted.manifest.files) {
 			std::string error;
 			auto src = extracted.payload_root / entry.source;
@@ -587,17 +796,11 @@ static pm_winpkg_result_t *install_extracted(LocalDatabase& db, const ExtractedP
 			if(!copy_payload_item(src, dst, entry.directory, error)) {
 				return result_with_error(error.c_str());
 			}
-			installed.trace.paths.push_back({entry.destination, entry.directory});
 		}
-		for(const auto& path : installed.trace.paths) {
-			PathChange change;
-			change.path = path.path;
-			change.change_type = TraceChangeType::Created;
-			change.after.exists = true;
-			change.after.directory = path.directory;
-			installed.trace.path_changes.push_back(std::move(change));
-		}
-		installed.trace.registry_changes = diff_registry_values({}, installed.trace.registry_values);
+		auto after_paths = snapshot_declared_paths(db.root(), installed.trace.paths);
+		set_path_changes(installed.trace, diff_snapshot(before_paths, after_paths));
+		add_registry_changes(installed.trace, diff_registry_values({}, installed.trace.registry_values));
+		ensure_trace_roots_from_paths(installed.trace);
 	} else if(extracted.manifest.installer.has_value()) {
 		const auto& installer = *extracted.manifest.installer;
 		installed.has_explicit_uninstall = installer.uninstall.has_value();
@@ -605,20 +808,13 @@ static pm_winpkg_result_t *install_extracted(LocalDatabase& db, const ExtractedP
 			installed.uninstall = *installer.uninstall;
 		}
 		auto before_paths = snapshot_tree(db.root(), installed.trace.trace_roots);
-		auto before_registry = installed.trace.registry_values;
+		auto before_registry = std::vector<OwnedRegistryValue>{};
 		CommandExecution execution;
 		auto executable = (extracted.extracted_root / installer.executable).string();
 		auto working_directory = installer.working_directory.empty()
 			? extracted.extracted_root.string()
 			: (extracted.extracted_root / installer.working_directory).string();
-		if(execute_command("install", executable, installer.arguments, working_directory, execution) != 0) {
-			installed.trace.command_results.push_back(execution);
-			installed.install_status = "install-command-failed";
-			installed.last_error = "wrapped installer returned non-zero status";
-			std::vector<std::string> save_errors;
-			db.save_package(installed, save_errors);
-			return result_with_error("wrapped installer returned non-zero status");
-		}
+		int exit_code = execute_command("install", executable, installer.arguments, working_directory, execution);
 		installed.trace.command_results.push_back(execution);
 		installed.trace.child_processes.push_back(executable);
 		auto after_paths = snapshot_tree(db.root(), installed.trace.trace_roots);
@@ -633,41 +829,26 @@ static pm_winpkg_result_t *install_extracted(LocalDatabase& db, const ExtractedP
 			}
 		}
 		add_trace_registry_values(installed.trace, active_registry);
-		if(installed.trace.paths.empty()) {
-			installed.trace.paths.push_back({
-				installer.working_directory.empty()
-					? extracted.extracted_root.string()
-					: installer.working_directory,
-				true
-			});
+		ensure_trace_roots_from_paths(installed.trace);
+		if(exit_code != 0) {
+			installed.install_status = "install-command-failed";
+			installed.last_error = "wrapped installer returned non-zero status";
+			std::string registry_error;
+			write_registry_state(db, installed, registry_error);
+			std::vector<std::string> save_errors;
+			db.save_package(installed, save_errors);
+			return result_with_error("wrapped installer returned non-zero status");
 		}
 	}
 
-	if(!installed.trace.registry_values.empty()) {
-		nlohmann::json registry = nlohmann::json::array();
-		for(const auto& value : installed.trace.registry_values) {
-			registry.push_back({
-				{"hive", value.hive},
-				{"key", value.key},
-				{"name", value.name},
-				{"type", value.type},
-				{"value", value.value}
-			});
-		}
-		std::error_code ec;
-		auto regdir = db.root() / "var" / "lib" / "pacman" / "windows-registry";
-		std::filesystem::create_directories(regdir, ec);
-		if(ec) {
-			return result_with_error("failed to create windows registry state directory");
-		}
-		std::ofstream regfile(regdir / (installed.manifest.name + ".json"));
-		if(!regfile) {
-			return result_with_error("failed to write windows registry state file");
-		}
-		regfile << registry.dump(2);
-	}
 	installed.install_status = "installed";
 	installed.uninstall_status = "not-run";
+	installed.last_error.clear();
+
+	std::string registry_error;
+	if(!write_registry_state(db, installed, registry_error)) {
+		return result_with_error(registry_error.c_str());
+	}
 
 	std::vector<std::string> save_errors;
 	if(!db.save_package(installed, save_errors)) {
@@ -792,83 +973,12 @@ pm_winpkg_result_t *pm_windows_remove_execute(alpm_handle_t *handle, alpm_list_t
 		if(!installed_view) {
 			return result_with_error("target not installed");
 		}
-		InstalledPackage installed = *installed_view;
-		const InstalledPackage *installed_ptr = &installed;
 		if(db.is_required_by_other(target_name, removing) && !(flags & ALPM_TRANS_FLAG_RECURSE)) {
 			return result_with_error("package is still required by another installed package");
 		}
-		if(installed_ptr->has_explicit_uninstall && !installed_ptr->uninstall.command.empty()) {
-			CommandExecution execution;
-			std::string working_directory;
-			if(!installed_ptr->uninstall.working_directory.empty()) {
-				working_directory = rooted_destination(db.root(), installed_ptr->uninstall.working_directory).string();
-			}
-			int exit_code = execute_command(
-				"uninstall",
-				installed_ptr->uninstall.command,
-				installed_ptr->uninstall.arguments,
-				working_directory,
-				execution);
-			installed.trace.command_results.push_back(execution);
-			if(exit_code != 0) {
-				installed.uninstall_status = "command-failed";
-				installed.last_error = "explicit uninstall command failed";
-				std::vector<std::string> save_errors;
-				db.save_package(installed, save_errors);
-				return result_with_error("explicit uninstall command failed");
-			}
-		}
-		auto before_cleanup = snapshot_tree(db.root(), installed.trace.trace_roots);
-		bool cleanup_failed = false;
-		for(const auto& change : installed.trace.path_changes) {
-			if(!cleanup_tracked_path(db.root(), change)) {
-				cleanup_failed = true;
-			}
-		}
-		for(const auto& shortcut : installed.trace.shortcuts) {
-			std::error_code ec;
-			std::filesystem::remove(rooted_destination(db.root(), shortcut), ec);
-			if(ec) {
-				cleanup_failed = true;
-			}
-		}
-		auto after_cleanup = snapshot_tree(db.root(), installed.trace.trace_roots);
-		auto residual_changes = diff_snapshot(before_cleanup, after_cleanup);
-		std::vector<PathChange> residual_present;
-		for(const auto& change : residual_changes) {
-			if(change.after.exists) {
-				residual_present.push_back(change);
-			}
-		}
-		if(cleanup_failed || !residual_present.empty()) {
-			installed.uninstall_status = cleanup_failed ? "cleanup-failed" : "residuals-remain";
-			installed.last_error = cleanup_failed ? "failed to clean tracked filesystem paths" : "tracked filesystem residuals remain after uninstall";
-			std::vector<std::string> save_errors;
-			db.save_package(installed, save_errors);
-			return result_with_error(installed.last_error.c_str());
-		}
-		if(!installed.trace.registry_values.empty()) {
-			if(registry_state_contains_tracked_values(db.root(), installed.manifest.name, installed.trace.registry_values)) {
-				installed.uninstall_status = "registry-residuals-remain";
-				installed.last_error = "tracked registry residuals remain after uninstall";
-				std::vector<std::string> save_errors;
-				db.save_package(installed, save_errors);
-				return result_with_error("tracked registry residuals remain after uninstall");
-			}
-			std::error_code ec;
-			auto registry_state_path = db.root() / "var" / "lib" / "pacman" / "windows-registry" / (installed.manifest.name + ".json");
-			std::filesystem::remove(registry_state_path, ec);
-			if(ec) {
-				installed.uninstall_status = "registry-cleanup-failed";
-				installed.last_error = "failed to remove registry state file";
-				std::vector<std::string> save_errors;
-				db.save_package(installed, save_errors);
-				return result_with_error("failed to remove registry state file");
-			}
-		}
-		std::vector<std::string> remove_errors;
-		if(!db.remove_package(target_name, remove_errors)) {
-			return result_with_error(remove_errors.empty() ? "failed to remove package state" : remove_errors.front().c_str());
+		std::string remove_error;
+		if(!remove_installed_package(db, *installed_view, remove_error)) {
+			return result_with_error(remove_error.c_str());
 		}
 	}
 

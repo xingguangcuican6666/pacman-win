@@ -341,15 +341,19 @@ pacman_tests = [
   'tests/upgrade-download-pkg-and-sig-with-filename.py',
   'tests/upgrade-download-with-xfercommand.py',
   'tests/windows-upgrade-basic.py',
+  'tests/windows-upgrade-reinstall.py',
+  'tests/windows-upgrade-replace.py',
   'tests/windows-sync-basic.py',
   'tests/windows-query-reason.py',
   'tests/windows-query-deps.py',
   'tests/windows-remove-recursive.py',
   'tests/windows-wrapped-installer.py',
+  'tests/windows-wrapped-installer-upgrade.py',
   'tests/windows-wrapped-installer-modify.py',
   'tests/windows-wrapped-installer-fail.py',
   'tests/windows-wrapped-remove.py',
   'tests/windows-wrapped-remove-fail.py',
+  'tests/windows-wrapped-remove-registry-residual.py',
 ]
 
 xfail_tests = {

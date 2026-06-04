@@ -19,7 +19,7 @@ jobs:
           sudo apt-get install -y \
             meson ninja-build pkg-config gettext \
             libarchive-dev libcurl4-openssl-dev libgpgme-dev \
-            libssl-dev libseccomp-dev bash fakeroot
+            libssl-dev libseccomp-dev bash fakeroot fakechroot
 
       - name: Configure
         run: meson setup build
@@ -34,29 +34,16 @@ jobs:
             --ldconfig /sbin/ldconfig \
             --scriptlet-shell /bin/sh \
             test/pacman/tests/windows-upgrade-basic.py \
+            test/pacman/tests/windows-upgrade-reinstall.py \
+            test/pacman/tests/windows-upgrade-replace.py \
             test/pacman/tests/windows-sync-basic.py \
             test/pacman/tests/windows-query-reason.py \
             test/pacman/tests/windows-query-deps.py \
             test/pacman/tests/windows-remove-recursive.py \
             test/pacman/tests/windows-wrapped-installer.py \
+            test/pacman/tests/windows-wrapped-installer-upgrade.py \
             test/pacman/tests/windows-wrapped-installer-modify.py \
             test/pacman/tests/windows-wrapped-installer-fail.py \
             test/pacman/tests/windows-wrapped-remove.py \
             test/pacman/tests/windows-wrapped-remove-fail.py \
             test/pacman/tests/windows-wrapped-remove-registry-residual.py
-
-      - name: Run Meson Test Targets
-        run: |
-          meson test -C build \
-            'pacman:windows-upgrade-basic.py' \
-            'pacman:windows-sync-basic.py' \
-            'pacman:windows-query-reason.py' \
-            'pacman:windows-query-deps.py' \
-            'pacman:windows-remove-recursive.py' \
-            'pacman:windows-wrapped-installer.py' \
-            'pacman:windows-wrapped-installer-modify.py' \
-            'pacman:windows-wrapped-installer-fail.py' \
-            'pacman:windows-wrapped-remove.py' \
-            'pacman:windows-wrapped-remove-fail.py' \
-            'pacman:windows-wrapped-remove-registry-residual.py' \
-            --print-errorlogs
